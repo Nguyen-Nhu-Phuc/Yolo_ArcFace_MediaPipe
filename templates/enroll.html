@@ -1,0 +1,711 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Nạp học sinh + test webcam</title>
+  <style>
+    :root {
+      --bg: #0f1419;
+      --panel: #1a2332;
+      --line: #2d3a4f;
+      --text: #e8eef7;
+      --muted: #8b9bb4;
+      --accent: #3d9cf0;
+      --accent-2: #2dd4a8;
+      --danger: #f07178;
+      --radius: 14px;
+      --font: "Segoe UI", system-ui, sans-serif;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: var(--font);
+      color: var(--text);
+      background:
+        radial-gradient(1200px 600px at 10% -10%, #1e3a5f 0%, transparent 55%),
+        radial-gradient(900px 500px at 100% 0%, #16352c 0%, transparent 50%),
+        var(--bg);
+    }
+    .wrap { max-width: 960px; margin: 0 auto; padding: 28px 18px 56px; }
+    h1 { margin: 0 0 8px; font-size: clamp(1.35rem, 2.5vw, 1.75rem); font-weight: 700; }
+    .sub { margin: 0 0 18px; color: var(--muted); line-height: 1.5; }
+    .sub a { color: var(--accent); }
+    .tabs { display: flex; gap: 8px; margin-bottom: 14px; flex-wrap: wrap; }
+    .tab {
+      appearance: none; border: 1px solid var(--line); background: #121821;
+      color: var(--muted); border-radius: 999px; padding: 8px 16px;
+      font: inherit; font-weight: 600; cursor: pointer;
+    }
+    .tab.active { background: linear-gradient(135deg, var(--accent), #5b7cfa); color: #fff; border-color: transparent; }
+    .card {
+      background: color-mix(in srgb, var(--panel) 92%, transparent);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 20px;
+    }
+    .panel { display: none; }
+    .panel.show { display: block; }
+    .grid {
+      display: grid;
+      grid-template-columns: 1.2fr 1fr;
+      gap: 16px;
+    }
+    @media (max-width: 800px) { .grid { grid-template-columns: 1fr; } }
+    label {
+      display: flex; flex-direction: column; gap: 6px;
+      font-size: 0.85rem; color: var(--muted); margin-bottom: 12px;
+    }
+    input[type="text"] {
+      background: #121821; border: 1px solid var(--line); color: var(--text);
+      border-radius: 8px; padding: 10px 12px; font: inherit;
+    }
+    .viewport {
+      position: relative;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      overflow: hidden;
+      background: #000;
+      line-height: 0;
+      aspect-ratio: 4 / 3;
+    }
+    .viewport video, .viewport canvas {
+      display: block; width: 100%; height: 100%; object-fit: cover;
+    }
+    .viewport canvas {
+      position: absolute; left: 0; top: 0; pointer-events: none;
+    }
+    .actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 12px; }
+    button {
+      appearance: none; border: 0; border-radius: 10px;
+      padding: 11px 18px; font: inherit; font-weight: 600; cursor: pointer;
+      background: linear-gradient(135deg, var(--accent), #5b7cfa); color: #fff;
+    }
+    button.secondary { background: #243044; color: var(--text); }
+    button.ok { background: linear-gradient(135deg, #1f9d6c, var(--accent-2)); color: #062016; }
+    button:disabled { opacity: 0.55; cursor: not-allowed; }
+    .shots {
+      display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 12px;
+    }
+    .shot {
+      background: #121821; border: 1px solid var(--line); border-radius: 10px;
+      padding: 8px; text-align: center;
+    }
+    .shot img {
+      width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 8px;
+      background: #0a0e14; display: block;
+    }
+    .shot span { display: block; margin-top: 6px; font-size: 0.8rem; color: var(--muted); }
+    .shot.has { border-color: color-mix(in srgb, var(--accent-2) 55%, var(--line)); }
+    .status {
+      margin-top: 14px; padding: 12px 14px; border-radius: 10px;
+      background: #121821; border: 1px solid var(--line); display: none;
+    }
+    .status.show { display: block; }
+    .status.error { border-color: var(--danger); color: #ffb4b8; }
+    .status.ok { border-color: color-mix(in srgb, var(--accent-2) 50%, var(--line)); }
+    .list {
+      margin-top: 14px; max-height: 220px; overflow: auto;
+      border: 1px solid var(--line); border-radius: 10px; background: #121821;
+    }
+    .list table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+    .list th, .list td { padding: 8px 10px; border-bottom: 1px solid var(--line); text-align: left; }
+    .list th { color: var(--muted); font-weight: 600; position: sticky; top: 0; background: #121821; }
+    .hint { color: var(--muted); font-size: 0.85rem; line-height: 1.45; }
+    .stats {
+      display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 12px;
+    }
+    .stat {
+      background: #121821; border: 1px solid var(--line);
+      border-radius: 10px; padding: 12px;
+    }
+    .stat b { display: block; margin-top: 4px; font-size: 1.15rem; color: var(--accent-2); }
+    .stat span { color: var(--muted); font-size: 0.8rem; }
+    .badges { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; min-height: 34px; }
+    .badge {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 6px 12px; border-radius: 999px; font-size: 0.82rem; font-weight: 600;
+      border: 1px solid var(--line); background: #121821; color: var(--muted);
+    }
+    .badge.on-hand { background: rgba(45,212,168,.15); border-color: #2dd4a8; color: #9af0d4; }
+    .badge.on-turn { background: rgba(240,113,120,.15); border-color: #f07178; color: #ffb4b8; }
+    .badge.on-drowsy { background: rgba(240,180,60,.15); border-color: #e6b84d; color: #ffe08a; }
+    .badge.on-writing { background: rgba(61,156,240,.12); border-color: #3d9cf0; color: #9ec9f5; }
+    .timers { margin-top: 10px; font-size: 0.82rem; color: var(--muted); line-height: 1.55; }
+    .beh-log-wrap {
+      margin-top: 10px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: #0d1219;
+      overflow: hidden;
+    }
+    .beh-log-head {
+      display: flex; justify-content: space-between; align-items: center;
+      padding: 8px 10px; border-bottom: 1px solid var(--line);
+      font-size: 0.8rem; color: var(--muted); font-weight: 600;
+    }
+    .beh-log-head button {
+      padding: 4px 10px; font-size: 0.75rem; border-radius: 8px;
+      background: #243044; color: var(--text);
+    }
+    #behLog {
+      max-height: 160px; overflow: auto; padding: 8px 10px;
+      font-family: Consolas, "Courier New", monospace;
+      font-size: 0.78rem; line-height: 1.55; color: #c5d0e0;
+      min-height: 72px;
+    }
+    #behLog .empty { color: var(--muted); font-family: var(--font); }
+    #behLog .row-hand { color: #9af0d4; }
+    #behLog .row-turn { color: #ffb4b8; }
+    #behLog .row-drowsy { color: #ffe08a; }
+    #behLog .row-writing { color: #9ec9f5; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Nạp học sinh mới + test webcam</h1>
+    <p class="sub">
+      Luồng riêng — không ảnh hưởng nhận diện video YOLO.
+      <a href="/">← Về trang video</a>
+    </p>
+
+    <div class="tabs">
+      <button type="button" class="tab active" data-tab="enroll">Nạp học sinh</button>
+      <button type="button" class="tab" data-tab="test">Test webcam</button>
+    </div>
+
+    <div class="card">
+      <div class="actions" style="margin-top:0;margin-bottom:12px">
+        <button type="button" class="secondary" id="btnCam">Bật webcam</button>
+        <button type="button" class="secondary" id="btnCamOff" disabled>Tắt webcam</button>
+        <span class="hint" id="camHint">Cần quyền camera trên trình duyệt.</span>
+      </div>
+
+      <div class="grid">
+        <div>
+          <div class="viewport">
+            <video id="cam" playsinline muted autoplay></video>
+            <canvas id="overlay"></canvas>
+          </div>
+          <canvas id="snap" style="display:none"></canvas>
+        </div>
+
+        <div>
+          <div class="panel show" id="panel-enroll">
+            <label>
+              Mã học sinh
+              <input type="text" id="studentId" placeholder="HS001" autocomplete="off" />
+            </label>
+            <label>
+              Họ tên
+              <input type="text" id="fullName" placeholder="Nguyen Van A" autocomplete="off" />
+            </label>
+            <label>
+              Lớp
+              <input type="text" id="className" value="LOP07" autocomplete="off" />
+            </label>
+            <p class="hint">Chụp ít nhất góc <b>front</b>. Nên thêm left/right để khớp tốt hơn.</p>
+            <div class="actions">
+              <button type="button" class="secondary" data-capture="front">Chụp front</button>
+              <button type="button" class="secondary" data-capture="left">Chụp left</button>
+              <button type="button" class="secondary" data-capture="right">Chụp right</button>
+            </div>
+            <div class="shots">
+              <div class="shot" id="shot-front"><img alt="front" /><span>front</span></div>
+              <div class="shot" id="shot-left"><img alt="left" /><span>left</span></div>
+              <div class="shot" id="shot-right"><img alt="right" /><span>right</span></div>
+            </div>
+            <div class="actions">
+              <button type="button" class="ok" id="btnSave" disabled>Lưu vào gallery</button>
+              <button type="button" class="secondary" id="btnClear">Xóa ảnh chụp</button>
+            </div>
+          </div>
+
+          <div class="panel" id="panel-test">
+            <p class="hint">
+              InsightFace (tên) + MediaPipe Pose/Face (hành vi). Không YOLO.
+              Thử: <b>giơ tay</b>, <b>quay đi ≥10s</b>, <b>cúi ngủ</b> vs <b>cúi viết</b>.
+            </p>
+            <div class="actions">
+              <button type="button" class="ok" id="btnTestStart" disabled>Bắt đầu test</button>
+              <button type="button" class="secondary" id="btnTestStop" disabled>Dừng</button>
+              <button type="button" class="secondary" id="btnBehReset" disabled>Reset đếm hành vi</button>
+            </div>
+            <div class="stats">
+              <div class="stat"><span>Mặt</span><b id="tFaces">0</b></div>
+              <div class="stat"><span>Đã nhận</span><b id="tNamed">0</b></div>
+              <div class="stat"><span>ms</span><b id="tMs">—</b></div>
+            </div>
+            <div class="badges" id="behBadges">
+              <span class="badge" id="bHand">Giơ tay</span>
+              <span class="badge" id="bTurn">Quay đi</span>
+              <span class="badge" id="bDrowsy">Ngủ gật</span>
+              <span class="badge" id="bWriting">Cúi viết</span>
+            </div>
+            <div class="timers" id="behTimers">Bộ đếm: —</div>
+            <div class="beh-log-wrap">
+              <div class="beh-log-head">
+                <span>Log hành vi</span>
+                <button type="button" id="btnLogClear">Xóa log</button>
+              </div>
+              <div id="behLog"><div class="empty">Chưa có sự kiện — khi badge bật sẽ ghi dòng tại đây.</div></div>
+            </div>
+            <div class="hint" id="tList" style="margin-top:10px"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="status" id="status"></div>
+
+      <div class="list">
+        <table>
+          <thead><tr><th>Mã</th><th>Họ tên</th></tr></thead>
+          <tbody id="studentBody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const cam = document.getElementById("cam");
+    const overlay = document.getElementById("overlay");
+    const snap = document.getElementById("snap");
+    const ctx = overlay.getContext("2d");
+    const statusEl = document.getElementById("status");
+    const btnCam = document.getElementById("btnCam");
+    const btnCamOff = document.getElementById("btnCamOff");
+    const btnSave = document.getElementById("btnSave");
+    const btnClear = document.getElementById("btnClear");
+    const btnTestStart = document.getElementById("btnTestStart");
+    const btnTestStop = document.getElementById("btnTestStop");
+
+    let stream = null;
+    let captures = {}; // angle -> Blob
+    let mode = "enroll";
+    let testBusy = false;
+    let testTimer = null;
+    let lastFaces = [];
+    let lastBehavior = null;
+    let prevBehSet = new Set();
+    let behLogLines = [];
+    const sessionId = "webcam-" + Math.random().toString(36).slice(2, 8);
+    const btnBehReset = document.getElementById("btnBehReset");
+    const behLogEl = document.getElementById("behLog");
+    const BEH_LABEL = {
+      hand_raise: "Giơ tay phát biểu",
+      turn_away: "Quay đi / nói chuyện",
+      drowsy: "Ngủ gật",
+      writing: "Cúi viết bài",
+    };
+    const BEH_CLASS = {
+      hand_raise: "row-hand",
+      turn_away: "row-turn",
+      drowsy: "row-drowsy",
+      writing: "row-writing",
+    };
+
+    function setStatus(msg, type) {
+      statusEl.textContent = msg;
+      statusEl.className = "status show " + (type || "");
+    }
+
+    function syncOverlay() {
+      const w = cam.videoWidth, h = cam.videoHeight;
+      if (!w || !h) return;
+      if (overlay.width !== w || overlay.height !== h) {
+        overlay.width = w;
+        overlay.height = h;
+      }
+    }
+
+    function renderBehLog() {
+      if (!behLogLines.length) {
+        behLogEl.innerHTML = '<div class="empty">Chưa có sự kiện — khi badge bật sẽ ghi dòng tại đây.</div>';
+        return;
+      }
+      behLogEl.innerHTML = behLogLines
+        .slice()
+        .reverse()
+        .map((l) => `<div class="${l.cls}">${l.text}</div>`)
+        .join("");
+      behLogEl.scrollTop = 0;
+    }
+
+    function clearBehLog() {
+      behLogLines = [];
+      prevBehSet = new Set();
+      renderBehLog();
+    }
+
+    function appendBehLog(code, who, signals) {
+      const now = new Date();
+      const ts = now.toLocaleTimeString("vi-VN", { hour12: false });
+      const ear = signals && signals.ear != null ? Number(signals.ear).toFixed(3) : "—";
+      const yaw = signals && signals.yaw != null ? signals.yaw : "—";
+      const pitch = signals && signals.pitch != null ? signals.pitch : "—";
+      const label = BEH_LABEL[code] || code;
+      const whoTxt = who || "?";
+      const text = `[${ts}] ${whoTxt} — ${label} (yaw ${yaw}° · pitch ${pitch}° · EAR ${ear})`;
+      behLogLines.push({ text, cls: BEH_CLASS[code] || "" });
+      if (behLogLines.length > 80) behLogLines.shift();
+      renderBehLog();
+      // Lưu file phía server (logs/behavior_webcam.jsonl)
+      const fd = new FormData();
+      fd.append("session_id", sessionId);
+      fd.append("behavior", code);
+      fd.append("label", label);
+      fd.append("student_id", whoTxt);
+      fd.append("yaw", String(yaw));
+      fd.append("pitch", String(pitch));
+      fd.append("ear", String(ear));
+      fetch("/enroll/behavior/log", { method: "POST", body: fd }).catch(() => {});
+    }
+
+    function updateBehUI(beh, who) {
+      const set = new Set((beh && beh.behaviors) || []);
+      document.getElementById("bHand").className = "badge" + (set.has("hand_raise") ? " on-hand" : "");
+      document.getElementById("bTurn").className = "badge" + (set.has("turn_away") ? " on-turn" : "");
+      document.getElementById("bDrowsy").className = "badge" + (set.has("drowsy") ? " on-drowsy" : "");
+      document.getElementById("bWriting").className = "badge" + (set.has("writing") ? " on-writing" : "");
+      const t = (beh && beh.timers) || {};
+      const s = (beh && beh.signals) || {};
+      const parts = [];
+      if (t.hand_raise != null) parts.push(`giơ tay ${t.hand_raise}s`);
+      if (t.turn_away != null) parts.push(`quay đi ${t.turn_away}s / 10s`);
+      if (t.drowsy != null) parts.push(`ngủ ${t.drowsy}s / 2.5s`);
+      const earBase = s.ear_baseline != null ? Number(s.ear_baseline).toFixed(2) : "—";
+      parts.push(`yaw ${s.yaw ?? "—"}° · pitch ${s.pitch ?? "—"}° · EAR ${s.ear ?? "—"}/${earBase}`);
+      if (s.nose_off != null) parts.push(`nose_off ${s.nose_off}`);
+      if (s.turn_raw) parts.push("turn●");
+      if (s.head_down_raw) parts.push("cúi●");
+      if (s.eyes_drowsy_raw) parts.push("mắt●");
+      if (s.face_lost) parts.push("mất mặt●");
+      document.getElementById("behTimers").textContent = "Bộ đếm: " + parts.join(" · ");
+
+      // Ghi log khi hành vi mới chuyển sang confirmed (cạnh dòng EAR)
+      for (const code of set) {
+        if (!prevBehSet.has(code)) appendBehLog(code, who, s);
+      }
+      prevBehSet = set;
+    }
+
+    function drawOverlay() {
+      syncOverlay();
+      ctx.clearRect(0, 0, overlay.width, overlay.height);
+      if (!overlay.width) return;
+
+      // skeleton
+      const sk = (lastBehavior && lastBehavior.skeleton) || [];
+      const byI = {};
+      for (const p of sk) {
+        if (p.v < 0.4) continue;
+        byI[p.i] = { x: p.x * overlay.width, y: p.y * overlay.height };
+      }
+      const bones = [[11,13],[13,15],[12,14],[14,16],[11,12],[0,11],[0,12]];
+      ctx.strokeStyle = "rgba(61,156,240,0.85)";
+      ctx.lineWidth = Math.max(2, overlay.width / 280);
+      for (const [a, b] of bones) {
+        if (!byI[a] || !byI[b]) continue;
+        ctx.beginPath();
+        ctx.moveTo(byI[a].x, byI[a].y);
+        ctx.lineTo(byI[b].x, byI[b].y);
+        ctx.stroke();
+      }
+      for (const p of Object.values(byI)) {
+        ctx.fillStyle = "#2dd4a8";
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, Math.max(3, overlay.width / 160), 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      for (const f of lastFaces || []) {
+        const color = f.known ? "#28c850" : "#4646dc";
+        const x1 = f.x1, y1 = f.y1, x2 = f.x2, y2 = f.y2;
+        ctx.strokeStyle = color;
+        ctx.lineWidth = Math.max(2, overlay.width / 320);
+        ctx.strokeRect(x1, y1, x2 - x1, y2 - y1);
+        const shortId = (sid) => {
+          if (!sid) return "";
+          const m = String(sid).match(/^HS0*(\d+)$/i);
+          return m ? `HS${m[1]}` : String(sid);
+        };
+        let label = f.known
+          ? `${shortId(f.student_id)} ${((f.sim || 0) * 100).toFixed(0)}%`
+          : `? ${((f.sim || 0) * 100).toFixed(0)}%`;
+        const behs = (lastBehavior && lastBehavior.behaviors) || [];
+        if (behs.length) label += " · " + behs.join(",");
+        ctx.font = `600 ${Math.max(14, overlay.width / 40)}px Segoe UI, sans-serif`;
+        const pad = 6;
+        const tw = ctx.measureText(label).width + pad * 2;
+        const th = Math.max(18, overlay.width / 36);
+        let ly = y1 - th - 4;
+        if (ly < 2) ly = y1 + 4;
+        ctx.fillStyle = "rgba(10,12,16,0.85)";
+        ctx.fillRect(x1, ly, tw, th);
+        ctx.fillStyle = color;
+        ctx.fillRect(x1, ly, 5, th);
+        ctx.fillStyle = "#fff";
+        ctx.fillText(label, x1 + pad + 4, ly + th * 0.72);
+      }
+
+      // banner hành vi nếu chưa có face box
+      const behs = (lastBehavior && lastBehavior.behaviors) || [];
+      if (behs.length && !(lastFaces && lastFaces.length)) {
+        const map = { hand_raise: "Giơ tay", turn_away: "Quay đi", drowsy: "Ngủ gật", writing: "Cúi viết" };
+        const text = behs.map((b) => map[b] || b).join(" · ");
+        ctx.font = `700 ${Math.max(16, overlay.width / 28)}px Segoe UI, sans-serif`;
+        ctx.fillStyle = "rgba(10,12,16,0.75)";
+        ctx.fillRect(8, 8, ctx.measureText(text).width + 20, 34);
+        ctx.fillStyle = "#ffe08a";
+        ctx.fillText(text, 18, 32);
+      }
+    }
+
+    function updateSaveBtn() {
+      btnSave.disabled = !captures.front;
+    }
+
+    function showShot(angle, blob) {
+      const box = document.getElementById("shot-" + angle);
+      if (!box) return;
+      const img = box.querySelector("img");
+      img.src = URL.createObjectURL(blob);
+      box.classList.add("has");
+    }
+
+    async function loadStudents() {
+      const res = await fetch("/enroll/students");
+      const data = await res.json();
+      if (!data.ok) throw new Error(data.error || "Không tải được danh sách");
+      const sid = document.getElementById("studentId");
+      if (!sid.value) sid.value = data.next_id || "";
+      const body = document.getElementById("studentBody");
+      body.innerHTML = (data.students || [])
+        .map((s) => `<tr><td>${s.student_id}</td><td>${s.full_name}</td></tr>`)
+        .join("");
+      return data;
+    }
+
+    async function startCam() {
+      if (stream) return;
+      stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: "user", width: { ideal: 1280 }, height: { ideal: 720 } },
+        audio: false,
+      });
+      cam.srcObject = stream;
+      await cam.play();
+      btnCam.disabled = true;
+      btnCamOff.disabled = false;
+      btnTestStart.disabled = false;
+      btnBehReset.disabled = false;
+      document.getElementById("camHint").textContent = "Webcam đang chạy.";
+      setStatus("Webcam sẵn sàng.", "ok");
+    }
+
+    function stopCam() {
+      stopTest();
+      if (stream) {
+        stream.getTracks().forEach((t) => t.stop());
+        stream = null;
+      }
+      cam.srcObject = null;
+      ctx.clearRect(0, 0, overlay.width, overlay.height);
+      btnCam.disabled = false;
+      btnCamOff.disabled = true;
+      btnTestStart.disabled = true;
+      btnBehReset.disabled = true;
+      document.getElementById("camHint").textContent = "Webcam đã tắt.";
+    }
+
+    async function captureAngle(angle) {
+      if (!stream || cam.readyState < 2) {
+        setStatus("Hãy bật webcam trước.", "error");
+        return;
+      }
+      syncOverlay();
+      snap.width = cam.videoWidth;
+      snap.height = cam.videoHeight;
+      snap.getContext("2d").drawImage(cam, 0, 0);
+      const blob = await new Promise((r) => snap.toBlob(r, "image/jpeg", 0.92));
+      if (!blob) {
+        setStatus("Không chụp được ảnh.", "error");
+        return;
+      }
+      captures[angle] = blob;
+      showShot(angle, blob);
+      updateSaveBtn();
+      setStatus(`Đã chụp góc ${angle}.`, "ok");
+    }
+
+    function clearCaptures() {
+      captures = {};
+      for (const angle of ["front", "left", "right"]) {
+        const box = document.getElementById("shot-" + angle);
+        const img = box.querySelector("img");
+        img.removeAttribute("src");
+        box.classList.remove("has");
+      }
+      updateSaveBtn();
+      setStatus("Đã xóa ảnh chụp tạm.", "ok");
+    }
+
+    async function saveStudent() {
+      if (!captures.front) {
+        setStatus("Cần chụp góc front.", "error");
+        return;
+      }
+      const studentId = document.getElementById("studentId").value.trim();
+      const fullName = document.getElementById("fullName").value.trim();
+      const className = document.getElementById("className").value.trim() || "LOP07";
+      if (!studentId) {
+        setStatus("Nhập mã học sinh.", "error");
+        return;
+      }
+      btnSave.disabled = true;
+      setStatus("Đang lưu vào gallery…", "ok");
+      try {
+        const fd = new FormData();
+        fd.append("student_id", studentId);
+        fd.append("full_name", fullName || studentId);
+        fd.append("class_name", className);
+        for (const [angle, blob] of Object.entries(captures)) {
+          fd.append("img_" + angle, blob, angle + ".jpg");
+        }
+        const res = await fetch("/enroll/save", { method: "POST", body: fd });
+        const data = await res.json();
+        if (!data.ok) throw new Error(data.error || "Lưu thất bại");
+        setStatus(
+          `${data.action === "updated" ? "Đã cập nhật" : "Đã thêm"} ${data.student_id} — gallery ${data.total_students} HS. Có thể sang tab Test webcam.`,
+          "ok"
+        );
+        clearCaptures();
+        document.getElementById("fullName").value = "";
+        await loadStudents();
+        document.getElementById("studentId").value = data.student_id;
+      } catch (err) {
+        setStatus(err.message || String(err), "error");
+        updateSaveBtn();
+      }
+    }
+
+    async function matchOnce() {
+      if (!stream || testBusy || cam.readyState < 2) return;
+      testBusy = true;
+      try {
+        syncOverlay();
+        const maxW = 640;
+        const scale = cam.videoWidth > maxW ? maxW / cam.videoWidth : 1;
+        snap.width = Math.round(cam.videoWidth * scale);
+        snap.height = Math.round(cam.videoHeight * scale);
+        snap.getContext("2d").drawImage(cam, 0, 0, snap.width, snap.height);
+        const blob = await new Promise((r) => snap.toBlob(r, "image/jpeg", 0.8));
+        if (!blob) return;
+        const fd = new FormData();
+        fd.append("frame", blob, "frame.jpg");
+        fd.append("session_id", sessionId);
+        fd.append("identify", "1");
+        fd.append("behavior", "1");
+        const res = await fetch("/enroll/match", { method: "POST", body: fd });
+        const data = await res.json();
+        if (!data.ok) throw new Error(data.error || "match lỗi");
+        const inv = 1 / scale;
+        lastFaces = (data.faces || []).map((f) => ({
+          ...f,
+          x1: f.x1 * inv, y1: f.y1 * inv, x2: f.x2 * inv, y2: f.y2 * inv,
+        }));
+        lastBehavior = data.behavior || null;
+        const knownWho = (lastFaces.find((f) => f.known) || {}).student_id || null;
+        updateBehUI(lastBehavior, knownWho);
+        drawOverlay();
+        document.getElementById("tFaces").textContent = data.count;
+        document.getElementById("tNamed").textContent = data.identified;
+        document.getElementById("tMs").textContent = data.ms;
+        const lines = lastFaces.map((f) =>
+          f.known
+            ? `${f.student_id} (${(f.sim * 100).toFixed(0)}%)`
+            : `Unknown (${(f.sim * 100).toFixed(0)}%)`
+        );
+        const behs = (lastBehavior && lastBehavior.behaviors) || [];
+        const behTxt = behs.length ? " · Hành vi: " + behs.join(", ") : "";
+        document.getElementById("tList").textContent = (lines.length
+          ? lines.join(" · ")
+          : "Không thấy mặt — nhìn thẳng camera.") + behTxt;
+      } catch (err) {
+        setStatus(err.message || String(err), "error");
+      } finally {
+        testBusy = false;
+      }
+    }
+
+    async function resetBehavior() {
+      const fd = new FormData();
+      fd.append("session_id", sessionId);
+      await fetch("/enroll/behavior/reset", { method: "POST", body: fd });
+      lastBehavior = null;
+      prevBehSet = new Set();
+      updateBehUI(null, null);
+      setStatus("Đã reset bộ đếm hành vi.", "ok");
+    }
+
+    function startTest() {
+      if (!stream) {
+        setStatus("Hãy bật webcam trước.", "error");
+        return;
+      }
+      stopTest();
+      resetBehavior();
+      btnTestStart.disabled = true;
+      btnTestStop.disabled = false;
+      setStatus("Đang test nhận diện + hành vi webcam…", "ok");
+      matchOnce();
+      testTimer = setInterval(matchOnce, 700);
+    }
+
+    function stopTest() {
+      if (testTimer) { clearInterval(testTimer); testTimer = null; }
+      btnTestStop.disabled = true;
+      btnTestStart.disabled = !stream;
+      lastFaces = [];
+      lastBehavior = null;
+      ctx.clearRect(0, 0, overlay.width, overlay.height);
+    }
+
+    document.querySelectorAll(".tab").forEach((tab) => {
+      tab.addEventListener("click", () => {
+        document.querySelectorAll(".tab").forEach((t) => t.classList.remove("active"));
+        tab.classList.add("active");
+        mode = tab.dataset.tab;
+        document.querySelectorAll(".panel").forEach((p) => p.classList.remove("show"));
+        document.getElementById("panel-" + mode).classList.add("show");
+        if (mode !== "test") stopTest();
+        else ctx.clearRect(0, 0, overlay.width, overlay.height);
+      });
+    });
+
+    document.querySelectorAll("[data-capture]").forEach((btn) => {
+      btn.addEventListener("click", () => captureAngle(btn.dataset.capture));
+    });
+
+    btnCam.addEventListener("click", async () => {
+      try { await startCam(); }
+      catch (err) { setStatus("Không mở được webcam: " + (err.message || err), "error"); }
+    });
+    btnCamOff.addEventListener("click", stopCam);
+    btnSave.addEventListener("click", saveStudent);
+    btnClear.addEventListener("click", clearCaptures);
+    btnTestStart.addEventListener("click", startTest);
+    btnTestStop.addEventListener("click", stopTest);
+    btnBehReset.addEventListener("click", resetBehavior);
+    document.getElementById("btnLogClear").addEventListener("click", clearBehLog);
+    window.addEventListener("beforeunload", stopCam);
+
+    (function paint() {
+      if (mode === "test") drawOverlay();
+      requestAnimationFrame(paint);
+    })();
+
+    loadStudents().catch((err) => setStatus(err.message || String(err), "error"));
+  </script>
+</body>
+</html>

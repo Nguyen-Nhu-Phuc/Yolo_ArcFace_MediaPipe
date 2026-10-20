@@ -1,0 +1,20 @@
+static/uploads/
+static/outputs/
+reports/
+demo/
+behavior_settings.json
+/yolo*.pt
+logs/
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Dữ liệu thử / dataset (ảnh khuôn mặt — không đẩy lên GitHub)
+frames_lop_hoc (1)/
+classroom-faces/
+2_dataset_arcface/
+2_dataset_arcface.zip
+*_dataset_arcface/
+*_dataset_arcface.zip
+_probe_home.html

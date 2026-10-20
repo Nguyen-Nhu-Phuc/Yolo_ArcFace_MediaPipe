@@ -1,0 +1,280 @@
+{
+  "backend": "insightface",
+  "model": "buffalo_l",
+  "task": "arcface_gallery",
+  "dataset": "D:\\thucnghiemdeepface\\classroom-faces-lop07",
+  "num_students": 34,
+  "embedding_dim": 512,
+  "match_threshold": 0.28,
+  "min_margin": 0.012,
+  "lock_sim": 0.38,
+  "offdiag_sim_mean": 0.1301877647638321,
+  "offdiag_sim_max": 0.4006098806858063,
+  "students": [
+    {
+      "student_id": "HS049",
+      "images": [
+        "front_01.jpg",
+        "right_01.jpg"
+      ],
+      "n": 2
+    },
+    {
+      "student_id": "HS050",
+      "images": [
+        "front_01.jpg",
+        "right_01.jpg"
+      ],
+      "n": 2
+    },
+    {
+      "student_id": "HS051",
+      "images": [
+        "front_01.jpg",
+        "left_01.jpg"
+      ],
+      "n": 2
+    },
+    {
+      "student_id": "HS052",
+      "images": [
+        "front_01.jpg",
+        "left_01.jpg"
+      ],
+      "n": 2
+    },
+    {
+      "student_id": "HS053",
+      "images": [
+        "front_01.jpg",
+        "left_01.jpg"
+      ],
+      "n": 2
+    },
+    {
+      "student_id": "HS054",
+      "images": [
+        "front_01.jpg",
+        "right_01.jpg"
+      ],
+      "n": 2
+    },
+    {
+      "student_id": "HS055",
+      "images": [
+        "front_01.jpg",
+        "left_01.jpg"
+      ],
+      "n": 2
+    },
+    {
+      "student_id": "HS056",
+      "images": [
+        "front_01.jpg",
+        "left_01.jpg"
+      ],
+      "n": 2
+    },
+    {
+      "student_id": "HS057",
+      "images": [
+        "front_01.jpg",
+        "right_01.jpg"
+      ],
+      "n": 2
+    },
+    {
+      "student_id": "HS058",
+      "images": [
+        "front_01.jpg",
+        "right_01.jpg"
+      ],
+      "n": 2
+    },
+    {
+      "student_id": "HS059",
+      "images": [
+        "front_01.jpg",
+        "left_01.jpg"
+      ],
+      "n": 2
+    },
+    {
+      "student_id": "HS060",
+      "images": [
+        "front_01.jpg",
+        "left_01.jpg"
+      ],
+      "n": 2
+    },
+    {
+      "student_id": "HS061",
+      "images": [
+        "front_01.jpg",
+        "left_01.jpg"
+      ],
+      "n": 2
+    },
+    {
+      "student_id": "HS062",
+      "images": [
+        "front_01.jpg",
+        "right_01.jpg"
+      ],
+      "n": 2
+    },
+    {
+      "student_id": "HS063",
+      "images": [
+        "front_01.jpg",
+        "left_01.jpg"
+      ],
+      "n": 2
+    },
+    {
+      "student_id": "HS064",
+      "images": [
+        "front_01.jpg",
+        "left_01.jpg"
+      ],
+      "n": 2
+    },
+    {
+      "student_id": "HS065",
+      "images": [
+        "front_01.jpg",
+        "left_01.jpg"
+      ],
+      "n": 2
+    },
+    {
+      "student_id": "HS066",
+      "images": [
+        "front_01.jpg",
+        "right_01.jpg"
+      ],
+      "n": 2
+    },
+    {
+      "student_id": "HS067",
+      "images": [
+        "front_01.jpg",
+        "right_01.jpg"
+      ],
+      "n": 2
+    },
+    {
+      "student_id": "HS068",
+      "images": [
+        "front_01.jpg",
+        "right_01.jpg"
+      ],
+      "n": 2
+    },
+    {
+      "student_id": "HS069",
+      "images": [
+        "front_01.jpg",
+        "left_01.jpg"
+      ],
+      "n": 2
+    },
+    {
+      "student_id": "HS070",
+      "images": [
+        "front_01.jpg",
+        "right_01.jpg"
+      ],
+      "n": 2
+    },
+    {
+      "student_id": "HS071",
+      "images": [
+        "front_01.jpg",
+        "left_01.jpg"
+      ],
+      "n": 2
+    },
+    {
+      "student_id": "HS072",
+      "images": [
+        "front_01.jpg",
+        "right_01.jpg"
+      ],
+      "n": 2
+    },
+    {
+      "student_id": "HS073",
+      "images": [
+        "front_01.jpg",
+        "left_01.jpg"
+      ],
+      "n": 2
+    },
+    {
+      "student_id": "HS074",
+      "images": [
+        "front_01.jpg",
+        "left_01.jpg"
+      ],
+      "n": 2
+    },
+    {
+      "student_id": "HS075",
+      "images": [
+        "front_01.jpg",
+        "right_01.jpg"
+      ],
+      "n": 2
+    },
+    {
+      "student_id": "HS076",
+      "images": [
+        "front_01.jpg",
+        "left_01.jpg"
+      ],
+      "n": 2
+    },
+    {
+      "student_id": "HS077",
+      "images": [
+        "front_01.jpg",
+        "left_01.jpg"
+      ],
+      "n": 2
+    },
+    {
+      "student_id": "HS078",
+      "images": [
+        "front_01.jpg",
+        "left_01.jpg"
+      ],
+      "n": 2
+    },
+    {
+      "student_id": "HS079",
+      "images": [
+        "left_01.jpg",
+        "up_01.jpg"
+      ],
+      "n": 2
+    },
+    {
+      "student_id": "HS080",
+      "images": [
+        "front_01.jpg",
+        "left_01.jpg"
+      ],
+      "n": 2
+    },
+    {
+      "student_id": "HS081",
+      "images": [
+        "front_01.jpg",
+        "left_01.jpg"
+      ],
+      "n": 2
+    }
+  ],
+  "elapsed_sec": 15.3
+}

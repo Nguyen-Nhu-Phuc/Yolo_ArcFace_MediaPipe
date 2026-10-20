@@ -1,0 +1,564 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>YOLOv12 + ArcFace — theo dõi tập trung trong lớp</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: "Segoe UI", system-ui, sans-serif; background: #0f172a; color: #e2e8f0; }
+.header { background: #1e293b; padding: 10px 16px; display: flex; align-items: center; gap: 14px; border-bottom: 1px solid #334155; flex-wrap: wrap; min-height: 56px; }
+.header h1 { font-size: 17px; color: #38bdf8; white-space: nowrap; }
+.header a { color: #2dd4a8; font-size: 13px; text-decoration: none; white-space: nowrap; }
+.controls { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.controls input { padding: 6px 10px; border: 1px solid #475569; border-radius: 4px; background: #0f172a; color: #e2e8f0; font-size: 13px; width: 340px; }
+.controls button { padding: 6px 14px; border: none; border-radius: 4px; cursor: pointer; font-size: 13px; font-weight: 500; color: #fff; }
+.btn-connect { background: #16a34a; }
+.btn-connect:hover { background: #15803d; }
+.btn-stop { background: #dc2626; }
+.btn-stop:hover { background: #b91c1c; }
+.btn-upload { background: #2563eb; }
+.btn-upload:hover { background: #1d4ed8; }
+.btn-excel { background: #15803d; }
+.btn-excel:hover { background: #166534; }
+.controls button:disabled { opacity: 0.5; cursor: not-allowed; }
+.controls select { padding: 6px 8px; border: 1px solid #475569; border-radius: 4px; background: #0f172a; color: #e2e8f0; font-size: 13px; max-width: 220px; }
+.btn-cam { background: #334155; }
+.btn-cam:hover { background: #475569; }
+.upload-progress { width: 120px; height: 6px; display: none; }
+.status { font-size: 13px; padding: 4px 10px; border-radius: 10px; }
+.status.connected { background: #166534; color: #86efac; }
+.status.disconnected { background: #991b1b; color: #fca5a5; }
+.status.loading { background: #854d0e; color: #fde68a; }
+.main { display: flex; height: calc(100vh - 56px); min-height: 0; }
+.video-panel { flex: 1; background: #000; position: relative; min-width: 0; overflow: hidden; }
+.video-panel img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+.video-panel.fit-cover img { object-fit: cover; }
+.video-panel .placeholder { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: #475569; font-size: 14px; text-align: center; padding: 20px; }
+.vp-tools { position: absolute; top: 10px; right: 10px; z-index: 3; display: flex; gap: 8px; opacity: 0.35; transition: opacity .2s ease; }
+.video-panel:hover .vp-tools { opacity: 1; }
+.vp-tools button { padding: 7px 12px; font-size: 12px; border-radius: 8px; cursor: pointer; color: #fff; background: rgba(10,12,16,0.75); border: 1px solid rgba(255,255,255,0.2); }
+.vp-tools button:hover { background: rgba(37,99,235,0.85); }
+.hud { position: absolute; top: 10px; left: 10px; z-index: 3; display: none; gap: 14px; padding: 7px 12px; border-radius: 8px; background: rgba(10,12,16,0.75); font-size: 14px; pointer-events: none; }
+.hud b { color: #38bdf8; }
+.video-panel:fullscreen .hud { display: flex; }
+.sidebar { width: 360px; background: #1e293b; display: flex; flex-direction: column; border-left: 1px solid #334155; min-height: 0; }
+.sidebar h3 { padding: 12px 16px 8px; font-size: 13px; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px; flex-shrink: 0; }
+.stats-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; padding: 0 12px 10px; flex-shrink: 0; }
+.stat-card { background: #0f172a; border-radius: 6px; padding: 8px 6px; text-align: center; }
+.stat-card .value { font-size: 20px; font-weight: 700; color: #38bdf8; }
+.stat-card .label { font-size: 10px; color: #64748b; margin-top: 2px; }
+.tabs { display: flex; gap: 4px; padding: 0 12px 8px; flex-shrink: 0; }
+.tab-btn { flex: 1; padding: 7px 6px; border: 1px solid #334155; border-radius: 6px; background: #0f172a; color: #94a3b8; font-size: 12px; cursor: pointer; }
+.tab-btn.active { background: #1d4ed8; border-color: #1d4ed8; color: #fff; font-weight: 600; }
+.tab-panel { display: none; flex: 1; min-height: 0; overflow-y: auto; padding: 0 12px 12px; }
+.tab-panel.active { display: block; }
+.student-row { display: flex; align-items: center; gap: 10px; padding: 8px; background: #0f172a; border-radius: 6px; margin-bottom: 6px; }
+.id-badge { min-width: 44px; height: 28px; padding: 0 6px; border-radius: 14px; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; }
+.id-badge.focused { background: #166534; color: #86efac; }
+.id-badge.unfocused { background: #991b1b; color: #fca5a5; }
+.id-badge.nopose { background: #3f3a1e; color: #fde68a; }
+.student-row .info { flex: 1; min-width: 0; }
+.student-row .name { font-size: 12px; color: #cbd5e1; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.student-row .score { font-size: 15px; font-weight: 700; }
+.score.high { color: #86efac; }
+.score.low { color: #fca5a5; }
+.score.none { color: #94a3b8; }
+.student-row .reasons { font-size: 11px; color: #64748b; margin-top: 3px; display: flex; flex-wrap: wrap; gap: 3px; }
+.tag { display: inline-block; padding: 1px 6px; border-radius: 4px; font-size: 11px; font-weight: 600; line-height: 1.5; cursor: help; }
+.tag.neg { background: #4c1d1d; color: #fca5a5; }
+.tag.pos { background: #14432a; color: #86efac; }
+.tag.ok { background: #1e293b; color: #94a3b8; cursor: default; }
+.tag.lock { background: #1e3a8a; color: #bfdbfe; margin-left: 4px; font-size: 10px; vertical-align: 1px; }
+.lg-row { display: grid; grid-template-columns: 64px 1fr 34px 38px; gap: 8px; align-items: start; padding: 7px 8px; background: #0f172a; border-radius: 6px; margin-bottom: 5px; transition: opacity .15s; }
+.lg-row.off { opacity: 0.45; }
+.lg-row.off .lg-name { text-decoration: line-through; }
+.switch { position: relative; width: 36px; height: 20px; margin-top: 1px; }
+.switch input { opacity: 0; width: 0; height: 0; }
+.switch span { position: absolute; inset: 0; border-radius: 10px; background: #475569; cursor: pointer; transition: background .15s; }
+.switch span::before { content: ""; position: absolute; left: 3px; top: 3px; width: 14px; height: 14px; border-radius: 50%; background: #fff; transition: transform .15s; }
+.switch input:checked + span { background: #16a34a; }
+.switch input:checked + span::before { transform: translateX(16px); }
+.switch input:disabled + span { cursor: wait; }
+.lg-actions { display: flex; gap: 6px; margin-bottom: 8px; }
+.lg-actions button { flex: 1; padding: 6px; border: 1px solid #334155; border-radius: 6px; background: #0f172a; color: #cbd5e1; font-size: 12px; cursor: pointer; }
+.lg-actions button:hover { background: #1d4ed8; border-color: #1d4ed8; color: #fff; }
+.legend-overlay .off { opacity: 0.4; text-decoration: line-through; }
+.lg-row .tag { text-align: center; cursor: default; }
+.lg-row .lg-name { font-size: 12px; color: #e2e8f0; font-weight: 600; }
+.lg-row .lg-cond { font-size: 11px; color: #64748b; margin-top: 2px; line-height: 1.4; }
+.lg-row .lg-pen { font-size: 12px; font-weight: 700; text-align: right; color: #fca5a5; }
+.lg-row .lg-pen.zero { color: #86efac; }
+.lg-section { font-size: 11px; color: #94a3b8; text-transform: uppercase; letter-spacing: .4px; margin: 10px 0 6px; }
+.lg-box { display: flex; gap: 8px; align-items: center; font-size: 12px; color: #cbd5e1; padding: 4px 8px; }
+.lg-box i { width: 14px; height: 14px; border: 3px solid; border-radius: 2px; flex-shrink: 0; }
+.legend-overlay { position: absolute; left: 10px; bottom: 10px; z-index: 3; display: none; max-width: 520px; padding: 10px 12px; border-radius: 10px; background: rgba(10,12,16,0.85); border: 1px solid rgba(255,255,255,0.15); }
+.legend-overlay.show { display: block; }
+.legend-overlay .ov-grid { display: grid; grid-template-columns: auto 1fr auto 1fr; gap: 5px 10px; align-items: center; font-size: 12px; color: #e2e8f0; }
+.legend-overlay .ov-title { font-size: 12px; color: #94a3b8; margin-bottom: 6px; }
+.log-entry { font-size: 11px; color: #64748b; padding: 2px 0; font-family: Consolas, monospace; word-break: break-all; }
+.empty { color: #475569; font-size: 13px; }
+.legend { padding: 0 12px 10px; font-size: 11px; color: #64748b; line-height: 1.6; flex-shrink: 0; }
+.clock { margin: 0 12px 10px; padding: 8px 10px; background: #0f172a; border-radius: 6px; font-size: 12px; color: #94a3b8; flex-shrink: 0; }
+.clock b { color: #fde68a; font-size: 14px; font-family: Consolas, monospace; }
+.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; vertical-align: -1px; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>YOLOv12 + ArcFace — Theo dõi tập trung</h1>
+  <div class="controls">
+    <select id="camSelect" title="Camera trên máy — ưu tiên OBS Virtual Camera (OBS: Start Virtual Camera → Làm mới)">
+      <option value="">Đang tải camera…</option>
+    </select>
+    <button class="btn-cam" id="btnRefreshCams" onclick="refreshCameras(true)" title="OBS: Start Virtual Camera rồi bấm Làm mới">Làm mới camera</button>
+    <input id="videoSource" value="0" placeholder="0, rtsp://... hoặc đường dẫn video" title="0 = webcam; rtsp://... = camera IP; hoặc đường dẫn file video">
+    <button class="btn-connect" id="btnConnect" onclick="connect()">Kết nối</button>
+    <button class="btn-stop" id="btnStop" onclick="disconnect()" disabled>Dừng</button>
+    <input type="file" id="fileInput" accept="video/*,.mp4,.avi,.mov,.mkv,.webm,.m4v,.mts,.m2ts" style="display:none" onchange="uploadVideo(this.files[0])">
+    <button class="btn-upload" id="btnUpload" onclick="document.getElementById('fileInput').click()">Tải video lên</button>
+    <progress class="upload-progress" id="uploadProgress" max="100" value="0"></progress>
+    <button class="btn-excel" id="btnExcel" onclick="downloadReport()" disabled title="Tải file Excel hành vi từng học sinh (theo ngày giờ trên video)">Xuất Excel</button>
+  </div>
+  <span class="status disconnected" id="statusBadge">Chưa kết nối</span>
+  <a href="/enroll">Nạp học sinh mới + test webcam →</a>
+</div>
+
+<div class="main">
+  <div class="video-panel" id="videoPanel">
+    <span class="placeholder" id="placeholder">Kết nối nguồn video hoặc tải video lên để bắt đầu theo dõi</span>
+    <img id="frameImg" alt="" style="display:none">
+    <div class="hud">
+      <span>Trên khung: <b id="hCount">-</b></span>
+      <span>Tập trung: <b id="hFocused">-</b></span>
+      <span>Điểm TB: <b id="hAvg">-</b></span>
+      <span>Đã gán tên: <b id="hNamed">-</b></span>
+      <span><b id="hTime"></b></span>
+    </div>
+    <div class="legend-overlay" id="legendOverlay">
+      <div class="ov-title">Chú thích nhãn trên video: <b>HS12 85 · Cúi</b> = mã HS · điểm · hành vi chính</div>
+      <div class="ov-grid" id="legendOverlayGrid"></div>
+    </div>
+    <div class="vp-tools">
+      <button type="button" id="btnLegend" title="Phím L">Chú thích</button>
+      <button type="button" id="btnFit" title="Phím C">Lấp đầy</button>
+      <button type="button" id="btnFull" title="Phím F hoặc nhấp đúp vào video">Toàn màn hình</button>
+    </div>
+  </div>
+  <div class="sidebar">
+    <h3>Tổng quan</h3>
+    <div class="stats-grid">
+      <div class="stat-card"><div class="value" id="studentCount">-</div><div class="label">Trên khung</div></div>
+      <div class="stat-card"><div class="value" id="focusedCount">-</div><div class="label">Tập trung</div></div>
+      <div class="stat-card"><div class="value" id="avgScore">-</div><div class="label">Điểm TB</div></div>
+      <div class="stat-card"><div class="value" id="namedCount">-</div><div class="label">Đã gán tên (khóa cứng)</div></div>
+      <div class="stat-card"><div class="value" id="analysisMs">-</div><div class="label">Phân tích (ms)</div></div>
+      <div class="stat-card"><div class="value" id="frameIdx">-</div><div class="label">Khung</div></div>
+    </div>
+    <div class="clock">Giờ trên video: <b id="videoTime">—</b> <span id="timeSource"></span></div>
+    <div class="legend">
+      <i style="background:#28c850"></i>Tập trung (≥50)
+      &nbsp; <i style="background:#eb3c3c"></i>Mất tập trung
+      &nbsp; <i style="background:#46a0c8"></i>Chưa thấy tư thế
+    </div>
+
+    <div class="tabs">
+      <button class="tab-btn active" data-tab="students" onclick="showTab('students')">Trên khung</button>
+      <button class="tab-btn" data-tab="legend" onclick="showTab('legend')">Hành vi</button>
+      <button class="tab-btn" data-tab="log" onclick="showTab('log')">Nhật ký</button>
+    </div>
+
+    <div class="tab-panel active" id="tab-students">
+      <div id="studentList"><span class="empty">Chưa có dữ liệu</span></div>
+    </div>
+    <div class="tab-panel" id="tab-legend">
+      <div class="lg-section">Bật / tắt hành vi — áp dụng ngay, lưu cho lần sau</div>
+      <div class="lg-actions">
+        <button type="button" onclick="setAllBehaviors(true)">Bật tất cả</button>
+        <button type="button" onclick="setAllBehaviors(false)">Tắt tất cả</button>
+      </div>
+      <div id="legendList"><span class="empty">Đang tải chú thích...</span></div>
+      <div class="lg-section">Màu khung &amp; nhãn trên video</div>
+      <div class="lg-box"><i style="border-color:#28c850"></i>Tập trung (điểm ≥ <span class="lgThreshold">50</span>)</div>
+      <div class="lg-box"><i style="border-color:#eb3c3c"></i>Mất tập trung (điểm &lt; <span class="lgThreshold">50</span>) — viền dày = cúi đầu lâu</div>
+      <div class="lg-box"><i style="border-color:#46a0c8"></i>Chưa lấy được tư thế, chưa chấm điểm</div>
+      <div class="lg-box"><b>HS12 85 · Cúi</b>&nbsp;= mã học sinh · điểm tập trung (0–100) · hành vi chính</div>
+      <div class="lg-box"><b>ID7</b>&nbsp;= chưa nhận diện được học sinh (số theo dõi tạm)</div>
+      <div class="lg-box"><span class="tag lock" style="margin-left:0">khóa</span>&nbsp;= khóa cứng mã HS (ArcFace ≥ 45% và hơn người khớp nhì ≥ 10%) — chỉ đổi khi HS khác khớp % cao hơn</div>
+    </div>
+    <div class="tab-panel" id="tab-log">
+      <div id="logPanel"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+let ws = null;
+let reportUrl = null;
+const panel = document.getElementById('videoPanel');
+const frameImg = document.getElementById('frameImg');
+const placeholder = document.getElementById('placeholder');
+const btnFull = document.getElementById('btnFull');
+const btnFit = document.getElementById('btnFit');
+let fitMode = localStorage.getItem('fitMode') === 'cover' ? 'cover' : 'contain';
+
+// Thay bằng /api/legend khi tải xong (giữ đồng bộ với ngưỡng phía server)
+let LEGEND = [
+  { name: 'Cúi đầu lâu', short: 'Cúi lâu', positive: false },
+  { name: 'Nhắm mắt', short: 'Ngủ', positive: false },
+  { name: 'Thẫn thờ', short: 'Thẫn', positive: false },
+  { name: 'Quay đầu', short: 'Quay', positive: false },
+  { name: 'Cúi đầu thoáng qua', short: 'Cúi', positive: false },
+  { name: 'Nghiêng người', short: 'Nghiêng', positive: false },
+  { name: 'Tay bất thường', short: 'Tay', positive: false },
+  { name: 'Nói chuyện', short: 'Nói', positive: false },
+  { name: 'Viết bài', short: 'Viết', positive: true },
+  { name: 'Giơ tay', short: 'Giơ tay', positive: true },
+];
+
+function legendOf(reason) {
+  return LEGEND.find(l => reason.startsWith(l.name)) || null;
+}
+
+function reasonTags(reasons) {
+  if (!reasons || !reasons.length) return '<span class="tag ok">Tập trung</span>';
+  return reasons.map(r => {
+    const lg = legendOf(r);
+    const cls = lg && lg.positive ? 'pos' : 'neg';
+    const tip = lg && lg.condition ? `${r} — ${lg.condition}` : r;
+    return `<span class="tag ${cls}" title="${esc(tip)}">${esc(lg ? lg.short : r)}</span>`;
+  }).join('');
+}
+
+function renderLegend(data) {
+  if (data) {
+    LEGEND = data.behaviors;
+    document.querySelectorAll('.lgThreshold').forEach(el => { el.textContent = data.attention_threshold; });
+  }
+  document.getElementById('legendList').innerHTML = LEGEND.map(l => {
+    const pen = l.penalty ? `−${l.penalty}` : '0';
+    const on = l.enabled !== false;
+    return `<div class="lg-row ${on ? '' : 'off'}">` +
+      `<span class="tag ${l.positive ? 'pos' : 'neg'}">${esc(l.short)}</span>` +
+      `<div><div class="lg-name">${esc(l.name)}</div><div class="lg-cond">${esc(l.condition || '')}</div></div>` +
+      `<div class="lg-pen ${l.penalty ? '' : 'zero'}" title="Điểm trừ">${pen}</div>` +
+      `<label class="switch" title="${on ? 'Đang bật — bấm để tắt' : 'Đang tắt — bấm để bật'}">` +
+        `<input type="checkbox" data-name="${esc(l.name)}" ${on ? 'checked' : ''}><span></span></label>` +
+    '</div>';
+  }).join('');
+  document.getElementById('legendOverlayGrid').innerHTML = LEGEND.map(l => {
+    const off = l.enabled === false ? ' off' : '';
+    return `<span class="tag ${l.positive ? 'pos' : 'neg'}${off}">${esc(l.short)}</span>` +
+      `<span class="${off}">${esc(l.name)}${l.penalty ? ` (−${l.penalty})` : ''}</span>`;
+  }).join('');
+}
+
+async function postBehaviors(body) {
+  document.querySelectorAll('#legendList input').forEach(i => { i.disabled = true; });
+  try {
+    const res = await fetch('/api/behaviors', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || res.status);
+    renderLegend(data);
+    const off = data.behaviors.filter(b => !b.enabled).map(b => b.short);
+    log('Hành vi đang tắt: ' + (off.length ? off.join(', ') : 'không có'));
+  } catch (err) {
+    log('Không đổi được bật/tắt hành vi: ' + err.message);
+    renderLegend(null);
+  }
+}
+
+function setAllBehaviors(on) { postBehaviors({ all: on }); }
+
+document.getElementById('legendList').addEventListener('change', (e) => {
+  const input = e.target.closest('input[data-name]');
+  if (input) postBehaviors({ enabled: { [input.dataset.name]: input.checked } });
+});
+
+fetch('/api/behaviors').then(r => r.json()).then(renderLegend).catch(() => renderLegend(null));
+
+function esc(s) {
+  return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+function shortId(sid) {
+  if (!sid) return '';
+  const m = String(sid).match(/^HS0*(\d+)$/i);
+  return m ? 'HS' + m[1] : String(sid);
+}
+
+function showTab(name) {
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === name));
+  document.querySelectorAll('.tab-panel').forEach(p => p.classList.toggle('active', p.id === 'tab-' + name));
+}
+
+function log(msg) {
+  const el = document.getElementById('logPanel');
+  const ts = new Date().toLocaleTimeString();
+  el.insertAdjacentHTML('beforeend', `<div class="log-entry">[${ts}] ${esc(msg)}</div>`);
+  el.scrollTop = el.scrollHeight;
+}
+
+const STATUS_TEXT = { connected: 'Đã kết nối', disconnected: 'Chưa kết nối', loading: 'Đang tải' };
+function setStatus(state) {
+  const badge = document.getElementById('statusBadge');
+  badge.className = 'status ' + state;
+  badge.textContent = STATUS_TEXT[state] || state;
+}
+
+function setText(id, v) { document.getElementById(id).textContent = v; }
+
+function renderStats(data) {
+  const list = data.students || [];
+  const scored = list.filter(s => s.score != null);
+  const focused = scored.filter(s => s.focused).length;
+  const avg = scored.length ? Math.round(scored.reduce((a, s) => a + s.score, 0) / scored.length) : '-';
+  setText('studentCount', list.length);
+  setText('focusedCount', focused);
+  setText('avgScore', avg);
+  setText('namedCount', data.identified != null ? `${data.identified} (${data.hard_locked ?? 0})` : '-');
+  setText('analysisMs', data.analysis_ms ?? '-');
+  setText('frameIdx', data.frame_idx);
+  setText('hCount', list.length);
+  setText('hFocused', focused);
+  setText('hAvg', avg);
+  setText('hNamed', data.identified ?? '-');
+  const TIME_SOURCE = { osd: '(đọc từ video)', system: '(đồng hồ máy)', video: '(chưa đọc được giờ trên video)' };
+  setText('videoTime', data.video_time || '—');
+  setText('timeSource', TIME_SOURCE[data.time_source] || '');
+  setText('hTime', data.video_time || '');
+
+  const el = document.getElementById('studentList');
+  if (!list.length) {
+    el.innerHTML = '<span class="empty">Chưa phát hiện học sinh</span>';
+    return;
+  }
+  el.innerHTML = list
+    .slice()
+    .sort((a, b) => (a.score ?? 101) - (b.score ?? 101))
+    .map(s => {
+      const cls = s.score == null ? 'nopose' : (s.focused ? 'focused' : 'unfocused');
+      const scoreCls = s.score == null ? 'none' : (s.score >= 50 ? 'high' : 'low');
+      const badge = s.known ? shortId(s.student_id) : ('ID' + s.id);
+      const who = s.known ? (s.name || s.student_id) : 'Chưa nhận diện';
+      const pct = s.match_pct != null ? ` (${Math.round(s.match_pct)}%)` : '';
+      const lock = s.hard_locked ? '<span class="tag lock" title="Khóa cứng: chỉ đổi khi học sinh khác khớp % cao hơn">khóa</span>' : '';
+      const why = s.score == null ? '<span class="tag ok">Chưa thấy tư thế</span>' : reasonTags(s.reasons);
+      return '<div class="student-row">' +
+        `<div class="id-badge ${cls}">${esc(badge)}</div>` +
+        '<div class="info">' +
+          `<div class="name">${esc(who)}${pct}${lock} · <span class="score ${scoreCls}">${s.score ?? '—'}</span></div>` +
+          `<div class="reasons">${why}</div>` +
+        '</div>' +
+      '</div>';
+    }).join('');
+}
+
+function connect() {
+  if (ws) disconnect();
+  const source = document.getElementById('videoSource').value;
+  setStatus('loading');
+  log('Đang kết nối tới ' + source.replace(/(:\/\/[^:\/@]+):[^@\/]*@/, '$1:***@') + '...');
+
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  ws = new WebSocket(proto + '//' + location.host + '/ws');
+  ws.binaryType = 'blob';
+
+  ws.onopen = () => {
+    document.getElementById('btnConnect').disabled = true;
+    document.getElementById('btnStop').disabled = false;
+    ws.send(JSON.stringify({ video_source: source }));
+  };
+
+  ws.onmessage = (event) => {
+    if (event.data instanceof Blob) { showFrame(event.data); return; }
+    const data = JSON.parse(event.data);
+    if (data.error) { log('LỖI: ' + data.error); return; }
+    if (data.status === 'loading') {
+      log(data.message + ' (' + data.resolution.join('x') + ', ' + Number(data.fps).toFixed(1) + ' fps)');
+      return;
+    }
+    if (data.status) {
+      if (data.status === 'streaming') setStatus('connected');
+      if (data.report_url) {
+        reportUrl = data.report_url;
+        document.getElementById('btnExcel').disabled = false;
+      }
+      log(data.message);
+      return;
+    }
+    if (data.type === 'stats') renderStats(data);
+  };
+
+  ws.onclose = () => {
+    setStatus('disconnected');
+    document.getElementById('btnConnect').disabled = false;
+    document.getElementById('btnStop').disabled = true;
+    log('Đã ngắt kết nối');
+    ws = null;
+  };
+  ws.onerror = () => log('Lỗi kết nối');
+}
+
+let frameUrl = null;
+let frameLoading = false;
+function showFrame(blob) {
+  if (frameLoading) return;
+  frameLoading = true;
+  const url = URL.createObjectURL(blob);
+  frameImg.onload = frameImg.onerror = () => {
+    if (frameUrl) URL.revokeObjectURL(frameUrl);
+    frameUrl = url;
+    frameLoading = false;
+  };
+  frameImg.src = url;
+  frameImg.style.display = '';
+  placeholder.style.display = 'none';
+}
+
+function uploadVideo(file) {
+  if (!file) return;
+  const btn = document.getElementById('btnUpload');
+  const progress = document.getElementById('uploadProgress');
+  const fileInput = document.getElementById('fileInput');
+  btn.disabled = true;
+  progress.value = 0;
+  progress.style.display = 'inline-block';
+  log('Đang tải lên ' + file.name + ' (' + (file.size / 1048576).toFixed(1) + ' MB)...');
+
+  const form = new FormData();
+  form.append('file', file);
+  const xhr = new XMLHttpRequest();
+  xhr.open('POST', '/api/upload');
+  xhr.upload.onprogress = (e) => {
+    if (e.lengthComputable) progress.value = Math.round(e.loaded / e.total * 100);
+  };
+  const finish = () => {
+    btn.disabled = false;
+    progress.style.display = 'none';
+    fileInput.value = '';
+  };
+  xhr.onload = () => {
+    finish();
+    let data = {};
+    try { data = JSON.parse(xhr.responseText); } catch (e) {}
+    if (xhr.status !== 200) {
+      log('Tải lên thất bại: ' + (data.detail || xhr.status));
+      return;
+    }
+    log('Đã tải lên ' + data.filename + ' (' + data.frames + ' khung, ' + Number(data.fps).toFixed(1) + ' fps)');
+    document.getElementById('videoSource').value = data.path;
+    connect();
+  };
+  xhr.onerror = () => { finish(); log('Tải lên thất bại: lỗi mạng'); };
+  xhr.send(form);
+}
+
+function disconnect() {
+  if (ws) { ws.close(); ws = null; }
+}
+
+const camSelect = document.getElementById('camSelect');
+const videoSourceInput = document.getElementById('videoSource');
+
+async function refreshCameras(userAction = false) {
+  const btnCams = document.getElementById('btnRefreshCams');
+  btnCams.disabled = true;
+  try {
+    const data = await (await fetch('/api/cameras')).json();
+    const cams = data.cameras || [];
+    camSelect.innerHTML = '';
+    if (!cams.length) {
+      camSelect.innerHTML = '<option value="">Không thấy camera</option>';
+      if (userAction) log('Không thấy camera. Start Virtual Camera trong OBS rồi bấm Làm mới camera.');
+      return;
+    }
+    for (const c of cams) {
+      const opt = document.createElement('option');
+      opt.value = String(c.index);
+      opt.textContent = `${c.index}: ${c.name}`;
+      camSelect.appendChild(opt);
+    }
+    const current = videoSourceInput.value.trim();
+    const keep = /^\d+$/.test(current) && cams.some(c => String(c.index) === current);
+    const pick = data.preferred != null ? String(data.preferred) : (keep ? current : String(cams[0].index));
+    camSelect.value = pick;
+    // Chỉ ghi đè ô nguồn khi đang là số camera (không xóa đường dẫn file / RTSP người dùng đã nhập)
+    if (/^\d*$/.test(current)) videoSourceInput.value = pick;
+    const chosen = cams.find(c => String(c.index) === pick);
+    const msg = chosen && chosen.preferred
+      ? `Đã chọn ${chosen.name} (camera ${chosen.index}). Nếu OBS chưa bật: Start Virtual Camera → Kết nối.`
+      : `Đã chọn ${chosen ? chosen.name : 'camera'}. Dùng OBS: Start Virtual Camera → Làm mới camera.`;
+    if (userAction) log(msg);
+    camSelect.title = msg;
+  } catch (err) {
+    camSelect.innerHTML = '<option value="">Lỗi tải camera</option>';
+    if (userAction) log('Không tải được danh sách camera: ' + err.message);
+  } finally {
+    btnCams.disabled = false;
+  }
+}
+
+camSelect.addEventListener('change', () => {
+  if (camSelect.value !== '') videoSourceInput.value = camSelect.value;
+});
+refreshCameras(false);
+
+function downloadReport() {
+  if (!reportUrl) return;
+  log('Đang xuất Excel hành vi...');
+  const a = document.createElement('a');
+  a.href = reportUrl;
+  a.download = '';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}
+
+function applyFitMode() {
+  panel.classList.toggle('fit-cover', fitMode === 'cover');
+  btnFit.textContent = fitMode === 'cover' ? 'Vừa khung' : 'Lấp đầy';
+}
+function toggleFitMode() {
+  fitMode = fitMode === 'cover' ? 'contain' : 'cover';
+  localStorage.setItem('fitMode', fitMode);
+  applyFitMode();
+}
+function toggleFullscreen() {
+  if (document.fullscreenElement) document.exitFullscreen();
+  else panel.requestFullscreen().catch(err => log('Không bật được toàn màn hình: ' + err.message));
+}
+const legendOverlay = document.getElementById('legendOverlay');
+const btnLegend = document.getElementById('btnLegend');
+function toggleLegendOverlay() {
+  const on = legendOverlay.classList.toggle('show');
+  localStorage.setItem('legendOverlay', on ? '1' : '0');
+  btnLegend.textContent = on ? 'Ẩn chú thích' : 'Chú thích';
+}
+if (localStorage.getItem('legendOverlay') === '1') toggleLegendOverlay();
+btnLegend.addEventListener('click', toggleLegendOverlay);
+legendOverlay.addEventListener('dblclick', (e) => e.stopPropagation());
+
+applyFitMode();
+btnFit.addEventListener('click', toggleFitMode);
+btnFull.addEventListener('click', toggleFullscreen);
+panel.addEventListener('dblclick', toggleFullscreen);
+document.addEventListener('fullscreenchange', () => {
+  btnFull.textContent = document.fullscreenElement ? 'Thoát toàn màn hình' : 'Toàn màn hình';
+});
+document.addEventListener('keydown', (e) => {
+  if (e.ctrlKey || e.altKey || e.metaKey) return;
+  if (['INPUT', 'TEXTAREA'].includes(e.target.tagName)) return;
+  const k = e.key.toLowerCase();
+  if (k === 'f') { e.preventDefault(); toggleFullscreen(); }
+  else if (k === 'c') { e.preventDefault(); toggleFitMode(); }
+  else if (k === 'l') { e.preventDefault(); toggleLegendOverlay(); }
+});
+</script>
+</body>
+</html>
