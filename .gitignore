@@ -8,6 +8,7 @@ logs/
 __pycache__/
 *.pyc
 .venv/
+.venv-compare/
 venv/
 
 # Dữ liệu thử / dataset (ảnh khuôn mặt — không đẩy lên GitHub)

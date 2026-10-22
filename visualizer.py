@@ -16,6 +16,8 @@ _FONT_CANDIDATES = (
     "segoeui.ttf",
     "DejaVuSans.ttf",
     "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+    "/System/Library/Fonts/Supplemental/Arial.ttf",
+    "/Library/Fonts/Arial Unicode.ttf",
 )
 
 COLOR_FOCUSED = (80, 200, 40)
