@@ -1,55 +1,86 @@
-"""Phát hiện 2 học sinh ngồi cạnh quay vào nhau (THỬ NGHIỆM, mặc định tắt).
+"""Phát hiện 2 học sinh ngồi cạnh quay mặt vào nhau (THỬ NGHIỆM, mặc định tắt).
 
-Cặp bị gắn cờ khi box sát nhau và góc vai lệch nhau nhiều.
+Cặp bị gắn cờ khi ngồi sát nhau cùng hàng, em bên trái quay sang phải và em bên phải
+quay sang trái, giữ đủ lâu. Thấy được miệng mà miệng không động thì không tính.
 """
 
 from __future__ import annotations
 
-import math
+from collections import deque
 
+import numpy as np
 
-def _compute_shoulder_angle(keypoints):
-    if keypoints is None or len(keypoints) < 17:
-        return None
-    left = keypoints[5]
-    right = keypoints[6]
-    if left[2] < 0.5 or right[2] < 0.5:
-        return None
-    return math.degrees(math.atan2(right[1] - left[1], right[0] - left[0]))
+from behavior import Debounce
+
+MAR_HISTORY = 8
+MAR_MIN_SAMPLES = 3
 
 
 def _horizontal_gap(det_a, det_b) -> float:
-    """Khoảng hở ngang giữa 2 box, chuẩn hóa theo chiều cao box trung bình."""
-    a_center = (det_a["x1"] + det_a["x2"]) / 2
-    b_center = (det_b["x1"] + det_b["x2"]) / 2
-    if a_center <= b_center:
-        gap = det_b["x1"] - det_a["x2"]
-    else:
-        gap = det_a["x1"] - det_b["x2"]
+    """Khoảng hở ngang giữa 2 box (a bên trái), chuẩn hóa theo chiều cao box trung bình."""
     avg_height = ((det_a["y2"] - det_a["y1"]) + (det_b["y2"] - det_b["y1"])) / 2
     if avg_height <= 0:
         return float("inf")
-    return gap / avg_height
+    return (det_b["x1"] - det_a["x2"]) / avg_height
 
 
-def detect_chat(detections, config) -> list[tuple]:
-    ch = config.behavior
-    if not ch.is_on("Nói chuyện") or len(detections) < 2:
-        return []
+def _row_offset(det_a, det_b) -> float:
+    avg_height = ((det_a["y2"] - det_a["y1"]) + (det_b["y2"] - det_b["y1"])) / 2
+    if avg_height <= 0:
+        return float("inf")
+    return abs((det_a["y1"] + det_a["y2"]) - (det_b["y1"] + det_b["y2"])) / 2 / avg_height
 
-    pairs = []
-    for i in range(len(detections)):
-        for j in range(i + 1, len(detections)):
-            det_a, det_b = detections[i], detections[j]
-            if _horizontal_gap(det_a, det_b) > ch.chat_distance_threshold:
-                continue
-            angle_a = _compute_shoulder_angle(det_a.get("keypoints"))
-            angle_b = _compute_shoulder_angle(det_b.get("keypoints"))
-            if angle_a is None or angle_b is None:
-                continue
-            diff = abs(angle_a - angle_b)
-            if diff > 180:
-                diff = 360 - diff
-            if diff >= ch.chat_angle_threshold:
-                pairs.append((det_a["track_id"], det_b["track_id"]))
-    return pairs
+
+class ChatTracker:
+    """Giữ thời gian từng cặp quay vào nhau qua nhiều lần phân tích (1 instance / phiên)."""
+
+    def __init__(self):
+        self._timers: dict[tuple[int, int], Debounce] = {}
+        self._mar: dict[int, deque] = {}
+
+    def _mouth_still(self, tid: int, bh) -> bool | None:
+        hist = self._mar.get(tid)
+        if hist is None or len(hist) < MAR_MIN_SAMPLES:
+            return None
+        return float(np.std(hist)) < bh.chat_mouth_std
+
+    def update(self, detections: list[dict], config, dt: float) -> list[tuple[int, int]]:
+        """detections cần x1..y2, track_id, mar (có thể None) và yaw: độ quay so với hướng
+        nhìn thường ngày của HS (StudentStateTracker.last_turn), dương = sang phải ảnh."""
+        bh = config.behavior
+        present = {d["track_id"] for d in detections}
+        for tid in [t for t in self._mar if t not in present]:
+            del self._mar[tid]
+        for d in detections:
+            if d.get("mar") is not None:
+                self._mar.setdefault(d["track_id"], deque(maxlen=MAR_HISTORY)).append(d["mar"])
+        if not bh.is_on("Nói chuyện"):
+            self._timers.clear()
+            return []
+
+        ordered = sorted(detections, key=lambda d: d["x1"] + d["x2"])
+        facing: set[tuple[int, int]] = set()
+        for i, left in enumerate(ordered):
+            for right in ordered[i + 1:]:
+                if (_horizontal_gap(left, right) > bh.chat_distance_threshold
+                        or _row_offset(left, right) > bh.chat_row_tolerance):
+                    continue
+                ya, yb = left.get("yaw"), right.get("yaw")
+                if ya is None or yb is None:
+                    continue
+                if ya < bh.chat_yaw_threshold or yb > -bh.chat_yaw_threshold:
+                    continue
+                still = [s for s in (self._mouth_still(left["track_id"], bh),
+                                     self._mouth_still(right["track_id"], bh)) if s is not None]
+                if still and all(still):
+                    continue
+                facing.add((left["track_id"], right["track_id"]))
+
+        pairs = []
+        for key in set(self._timers) | facing:
+            t = self._timers.setdefault(key, Debounce()).step(key in facing, dt, bh.miss_tolerance_sec)
+            if t <= 0:
+                del self._timers[key]
+            elif t >= bh.chat_duration:
+                pairs.append(key)
+        return pairs

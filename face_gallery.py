@@ -43,10 +43,19 @@ STUDENTS_CSV = DATASET_DIR / "students.csv"
 
 # Ngưỡng mặc định cho InsightFace ArcFace (sẽ ghi đè từ meta.json nếu có)
 # Quy tắc: % tương thích = cosine_sim * 100. Dưới MIN_COMPAT_PCT → không gán / gán lại.
-MATCH_THRESHOLD = 0.20
-MIN_COMPAT_PCT = 20.0
+MATCH_THRESHOLD = 0.45
+MIN_COMPAT_PCT = 45.0
 MIN_MARGIN = 0.004  # lớp đông: top-1 / top-2 thường sát nhau
-LOCK_SIM = 0.28
+LOCK_SIM = 0.45
+# Khóa cứng: khớp ArcFace cao + tách hẳn người khớp nhì → chỉ đổi khi HS khác có % cao hơn.
+# Đo trên video lớp: top-1 trung vị ~47%, chênh với top-2 trung vị ~17%.
+HARD_LOCK_PCT = float(os.environ.get("HARD_LOCK_PCT", "45"))
+HARD_LOCK_MARGIN_PCT = float(os.environ.get("HARD_LOCK_MARGIN_PCT", "10"))
+# Các khóa ngưỡng trong meta.json — giữ nguyên khi dựng lại gallery / nạp HS mới
+THRESHOLD_KEYS = (
+    "match_threshold", "min_compat_pct", "min_margin", "lock_sim",
+    "hard_lock_pct", "hard_lock_margin_pct",
+)
 
 ANGLE_WEIGHTS = {
     "front": 1.00,
@@ -60,12 +69,33 @@ _face_app = None
 _gallery_write_lock = threading.Lock()
 
 
+def read_meta() -> dict:
+    if not META_JSON.exists():
+        return {}
+    try:
+        return json.loads(META_JSON.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def _write_meta(meta: dict) -> None:
+    META_JSON.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def derive_lock_sim(match_threshold: float, hard_lock_sim: float) -> float:
+    """Mức 'khớp chắc' (dừng thử thêm crop, nhận lại mã khi track đổi): trên ngưỡng nhận diện
+    8 điểm %, nhưng không vượt ngưỡng khóa cứng."""
+    return max(match_threshold, min(match_threshold + 0.08, hard_lock_sim))
+
+
 def _load_thresholds_from_meta() -> None:
-    global MATCH_THRESHOLD, MIN_COMPAT_PCT, MIN_MARGIN, LOCK_SIM
+    global MATCH_THRESHOLD, MIN_COMPAT_PCT, MIN_MARGIN, LOCK_SIM, HARD_LOCK_PCT, HARD_LOCK_MARGIN_PCT
     if not META_JSON.exists():
         return
     try:
         meta = json.loads(META_JSON.read_text(encoding="utf-8"))
+        HARD_LOCK_PCT = float(meta.get("hard_lock_pct", HARD_LOCK_PCT))
+        HARD_LOCK_MARGIN_PCT = float(meta.get("hard_lock_margin_pct", HARD_LOCK_MARGIN_PCT))
         MATCH_THRESHOLD = float(meta.get("match_threshold", MATCH_THRESHOLD))
         MIN_COMPAT_PCT = float(
             meta.get("min_compat_pct", meta.get("match_threshold", MATCH_THRESHOLD) * 100.0)
@@ -83,6 +113,18 @@ def _load_thresholds_from_meta() -> None:
 def sim_to_pct(sim: float) -> float:
     """Cosine similarity → % tương thích (0–100)."""
     return max(0.0, min(100.0, float(sim) * 100.0))
+
+
+def load_student_classes() -> dict[str, str]:
+    """Mã HS → lớp, đọc từ students.csv (thiếu file/cột thì trả rỗng)."""
+    if not STUDENTS_CSV.exists():
+        return {}
+    with STUDENTS_CSV.open(encoding="utf-8-sig", newline="") as f:
+        return {
+            (row.get("student_id") or "").strip(): (row.get("class_name") or "").strip()
+            for row in csv.DictReader(f)
+            if (row.get("student_id") or "").strip()
+        }
 
 
 def get_face_app():
@@ -181,14 +223,58 @@ class FaceRecognizer:
         self.min_compat_pct = MIN_COMPAT_PCT
         self.min_margin = MIN_MARGIN
         self.lock_sim = LOCK_SIM
+        self.hard_lock_sim = HARD_LOCK_PCT / 100.0
+        self.hard_lock_margin = HARD_LOCK_MARGIN_PCT / 100.0
 
         # warmup
         get_face_app()
         print(
             f"Gallery ArcFace: {len(self.ids)} HS từ {path} | "
             f"thr={self.match_threshold:.2f} (≥{self.min_compat_pct:.0f}%) "
-            f"margin={self.min_margin}"
+            f"margin={self.min_margin} | khóa cứng ≥{HARD_LOCK_PCT:.0f}% (+{HARD_LOCK_MARGIN_PCT:.0f}%)"
         )
+
+    def _threshold_meta(self) -> dict:
+        return {
+            "match_threshold": round(self.match_threshold, 4),
+            "min_compat_pct": round(self.min_compat_pct, 2),
+            "min_margin": self.min_margin,
+            "lock_sim": round(self.lock_sim, 4),
+            "hard_lock_pct": round(self.hard_lock_sim * 100, 1),
+            "hard_lock_margin_pct": round(self.hard_lock_margin * 100, 1),
+        }
+
+    def thresholds(self) -> dict:
+        """Ngưỡng đang dùng (theo %) + độ giống giữa các HS trong gallery để tham khảo."""
+        meta = read_meta()
+        off_mean, off_max = meta.get("offdiag_sim_mean"), meta.get("offdiag_sim_max")
+        return {
+            "match_pct": round(self.min_compat_pct, 1),
+            "hard_lock_pct": round(self.hard_lock_sim * 100, 1),
+            "hard_lock_margin_pct": round(self.hard_lock_margin * 100, 1),
+            "lock_pct": round(self.lock_sim * 100, 1),
+            "gallery_size": len(self.ids),
+            "offdiag_mean_pct": round(off_mean * 100, 1) if off_mean is not None else None,
+            "offdiag_max_pct": round(off_max * 100, 1) if off_max is not None else None,
+        }
+
+    def set_thresholds(self, match_pct: float, hard_lock_pct: float, hard_lock_margin_pct: float) -> None:
+        """Đổi ngưỡng (áp dụng ngay cho mọi lần so khớp sau) và lưu vào meta.json."""
+        if not 5 <= match_pct <= 95:
+            raise ValueError("Ngưỡng nhận diện phải trong khoảng 5–95%.")
+        if not match_pct <= hard_lock_pct <= 99:
+            raise ValueError("Ngưỡng khóa cứng phải ≥ ngưỡng nhận diện và ≤ 99%.")
+        if not 0 <= hard_lock_margin_pct <= 50:
+            raise ValueError("Chênh lệch khóa cứng phải trong khoảng 0–50%.")
+        self.match_threshold = match_pct / 100.0
+        self.min_compat_pct = float(match_pct)
+        self.hard_lock_sim = hard_lock_pct / 100.0
+        self.hard_lock_margin = hard_lock_margin_pct / 100.0
+        self.lock_sim = derive_lock_sim(self.match_threshold, self.hard_lock_sim)
+        with _gallery_write_lock:
+            meta = read_meta()
+            meta.update(self._threshold_meta())
+            _write_meta(meta)
 
     def is_compatible(self, sim: float) -> bool:
         """True nếu % tương thích ≥ MIN_COMPAT_PCT (và ≥ match_threshold)."""
@@ -380,12 +466,7 @@ class FaceRecognizer:
         np.savez(GALLERY_NPZ, **payload)
         np.savez(LEGACY_NPZ, **payload)
 
-        meta: dict = {}
-        if META_JSON.exists():
-            try:
-                meta = json.loads(META_JSON.read_text(encoding="utf-8"))
-            except Exception:
-                meta = {}
+        meta = read_meta()
         meta.update(
             {
                 "backend": "insightface",
@@ -394,15 +475,10 @@ class FaceRecognizer:
                 "dataset": str(DATASET_DIR.resolve()),
                 "num_students": len(self.ids),
                 "embedding_dim": int(emb.shape[1]) if len(emb) else 512,
-                "match_threshold": self.match_threshold,
-                "min_compat_pct": self.min_compat_pct,
-                "min_margin": self.min_margin,
-                "lock_sim": self.lock_sim,
+                **self._threshold_meta(),
             }
         )
-        META_JSON.write_text(
-            json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8"
-        )
+        _write_meta(meta)
 
     def _upsert_students_csv(
         self, student_id: str, full_name: str, class_name: str

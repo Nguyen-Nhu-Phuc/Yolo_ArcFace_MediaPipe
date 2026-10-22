@@ -28,6 +28,7 @@ import cv2
 import numpy as np
 
 from face_augment import augment_far_variants
+from face_gallery import THRESHOLD_KEYS
 
 BASE_DIR = Path(__file__).resolve().parent
 
@@ -218,17 +219,25 @@ def export_gallery(dataset_dir: Path, out_dir: Path) -> dict:
         "dataset": str(dataset_dir.resolve()),
         "num_students": len(ids),
         "embedding_dim": int(emb_mat.shape[1]),
-        "match_threshold": 0.20,
-        "min_compat_pct": 20.0,
+        "match_threshold": 0.45,
+        "min_compat_pct": 45.0,
         "min_margin": 0.004,
-        "lock_sim": 0.28,
+        "lock_sim": 0.45,
         "offdiag_sim_mean": float(off.mean()),
         "offdiag_sim_max": float(off.max()),
         "students": details,
         "gallery_augment": "enroll+test; far_downscale/jpeg/blur on enroll",
         "elapsed_sec": round(time.time() - t0, 1),
     }
-    (out_dir / "meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
+    meta_path = out_dir / "meta.json"
+    if meta_path.exists():
+        # Giữ ngưỡng đã chỉnh trên giao diện khi dựng lại gallery
+        try:
+            old = json.loads(meta_path.read_text(encoding="utf-8"))
+            meta.update({k: old[k] for k in THRESHOLD_KEYS if k in old})
+        except Exception:  # noqa: BLE001
+            pass
+    meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
 
     # Đồng bộ cache cũ để tương thích
     legacy = dataset_dir / "arcface_gallery.npz"

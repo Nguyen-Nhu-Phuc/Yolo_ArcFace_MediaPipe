@@ -7,7 +7,6 @@ Tách 2 phần để chạy ở 2 luồng:
 
 from __future__ import annotations
 
-import os
 import threading
 
 import cv2
@@ -26,10 +25,7 @@ MIN_BOX_W = 22
 MIN_BOX_H = 36
 STICKY_TTL = 120  # giữ tên ~N lần cập nhật track sau khi track ID đổi / mất tạm
 STICKY_IOU = 0.20  # IoU tối thiểu để gắn lại tên vào box mới cùng chỗ
-# Khóa cứng: khớp ArcFace cao + tách hẳn người khớp nhì → chỉ đổi khi HS khác có % cao hơn.
-# Đo trên video lớp: top-1 trung vị ~47%, chênh với top-2 trung vị ~17%.
-HARD_LOCK_SIM = float(os.environ.get("HARD_LOCK_PCT", "45")) / 100.0
-HARD_LOCK_MARGIN = float(os.environ.get("HARD_LOCK_MARGIN_PCT", "10")) / 100.0
+# Ngưỡng khóa cứng nằm trong FaceRecognizer (hard_lock_sim / hard_lock_margin, chỉnh trên giao diện)
 HARD_STICKY_TTL = 900  # giữ mã HS khóa cứng khi mất tạm (~15 phút ở ~1 lần cập nhật/giây)
 HARD_RECOG_EVERY = 24  # khóa cứng: kiểm tra lại thưa hơn nữa
 # Track đang giữ mã không thấy trong N lần cập nhật → coi như vắng, track mới được nhận lại mã
@@ -44,6 +40,7 @@ FACE_SWEEP_MAX = 40
 # Detector InsightFace luôn resize về det_size; ảnh nguồn lớn hơn chỉ làm crop mặt căn chỉnh nét hơn
 # (đo trên video lớp: 960px → top-1 trung vị 40%, 1280px → 47%)
 FACE_SWEEP_MAX_SIDE = 1280
+HEAD_POSE_KEEP = 30  # bỏ góc đầu cũ hơn N lần cập nhật track
 
 Track = tuple[int, int, int, int, int]  # (tid, x1, y1, x2, y2)
 
@@ -201,6 +198,7 @@ class IdentityTracker:
             self.id_fail: dict[int, int] = {}
             self.id_last_box: dict[int, tuple[int, int, int, int]] = {}
             self.id_last_seen: dict[int, int] = {}
+            self.id_head_pose: dict[int, tuple[float, float, int]] = {}
             self.sid_owner: dict[str, int] = {}
             self.frame_i = 0
             self.recog_i = 0
@@ -253,9 +251,18 @@ class IdentityTracker:
             self.id_last_seen.pop(old_tid, None)
             self.sid_owner[sid] = new_tid
 
-    @staticmethod
-    def _is_hard(sim: float, margin: float) -> bool:
-        return sim >= HARD_LOCK_SIM and margin >= HARD_LOCK_MARGIN
+    def _is_hard(self, sim: float, margin: float) -> bool:
+        return sim >= self.rec.hard_lock_sim and margin >= self.rec.hard_lock_margin
+
+    def drop_below(self, match_threshold: float, hard_lock_sim: float) -> int:
+        """Sau khi nâng ngưỡng: bỏ tên các track khớp tốt nhất dưới ngưỡng mới. Trả về số track bị bỏ."""
+        with self.lock:
+            dropped = [t for t in self.id_locked if self.id_best_sim.get(t, 0.0) < match_threshold]
+            for tid in dropped:
+                self._clear_identity(tid)
+            for tid in [t for t in self.id_hard if self.id_best_sim.get(t, 0.0) < hard_lock_sim]:
+                self.id_hard.discard(tid)
+            return len(dropped)
 
     def _owner_absent(self, owner: int) -> bool:
         return self.frame_i - self.id_last_seen.get(owner, -10**9) > OWNER_ABSENT_UPDATES
@@ -371,7 +378,20 @@ class IdentityTracker:
                 if best_tid is not None:
                     self._transfer_lock(otid, best_tid)
                     taken_new.add(best_tid)
+            for tid in [t for t, p in self.id_head_pose.items() if frame_i - p[2] > HEAD_POSE_KEEP]:
+                del self.id_head_pose[tid]
             return parsed
+
+    def head_pose(self, tid: int, max_age: int) -> tuple[float, float] | None:
+        """(yaw, pitch) độ từ InsightFace nếu đo trong N lần cập nhật gần nhất.
+
+        yaw dương = quay sang phải ảnh, pitch dương = cúi xuống.
+        """
+        with self.lock:
+            p = self.id_head_pose.get(tid)
+            if p is None or self.frame_i - 1 - p[2] > max_age:
+                return None
+            return p[0], p[1]
 
     def describe(self, tid: int) -> dict:
         """Tên hiện tại của track (không chạy ArcFace)."""
@@ -508,7 +528,11 @@ class IdentityTracker:
                 continue
             emb = np.asarray(face.normed_embedding, dtype=np.float32)
             sid, full_name, sim, margin = self.rec._match_embedding(emb)
+            pose = face.get("pose")
             with self.lock:
+                if pose is not None:
+                    # InsightFace: pose = [pitch, yaw, roll], pitch âm khi cúi
+                    self.id_head_pose[tid] = (float(pose[1]), -float(pose[0]), self.frame_i - 1)
                 self.id_has_face.add(tid)
                 self.id_noface[tid] = 0
                 self.id_last_recog[tid] = recog_i

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import re
 from functools import lru_cache
 
 import cv2
@@ -24,28 +23,22 @@ COLOR_UNFOCUSED = (60, 60, 235)
 COLOR_NO_POSE = (200, 160, 70)
 
 
-def short_reason(reasons: list) -> str:
+def main_reason(reasons: list) -> str:
+    """Tên đầy đủ của hành vi chính, bỏ phần số giây: 'Cúi đầu lâu (3.2s)' → 'Cúi đầu lâu'."""
     for reason in reasons:
-        for prefix, short in REASON_SHORT:
-            if prefix in reason:
-                return short
+        for name, _short in REASON_SHORT:
+            if name in reason:
+                return name
     return ""
 
 
-def short_student_id(sid: str | None) -> str:
-    if not sid:
-        return ""
-    m = re.match(r"^HS0*(\d+)$", str(sid), re.I)
-    return f"HS{m.group(1)}" if m else str(sid)
-
-
 def _label_for(det: dict) -> str:
-    who = short_student_id(det.get("student_id")) if det.get("known") else f"ID{det['track_id']}"
+    who = det.get("student_id") if det.get("known") else f"ID{det['track_id']}"
     score = det.get("score")
     if score is None:
         return who
     label = f"{who} {score}"
-    tag = short_reason(det.get("reasons") or [])
+    tag = main_reason(det.get("reasons") or [])
     if tag:
         label = f"{label} · {tag}"
     return label

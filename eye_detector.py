@@ -14,6 +14,7 @@ FACE_MODEL = Path(__file__).resolve().parent / "models" / "mediapipe" / "face_la
 
 LEFT_EYE_INDICES = [33, 160, 158, 133, 153, 144]
 RIGHT_EYE_INDICES = [362, 385, 387, 263, 373, 380]
+MOUTH_INDICES = [13, 14, 78, 308]  # môi trên, môi dưới, khóe trái, khóe phải
 
 
 def calculate_ear_from_landmarks(eye_points: np.ndarray) -> float:
@@ -46,7 +47,8 @@ class EyeDetector:
         )
         self.face_landmarker = vision.FaceLandmarker.create_from_options(options)
 
-    def get_ear(self, face_image) -> float | None:
+    def measure(self, face_image) -> dict | None:
+        """{"ear": độ mở mắt, "mar": độ mở miệng (khoảng cách môi / bề rộng miệng)}."""
         import mediapipe as mp
 
         if face_image is None or face_image.size == 0:
@@ -60,15 +62,22 @@ class EyeDetector:
         landmarks = result.face_landmarks[0]
         h, w = face_image.shape[:2]
 
-        def eye_points(indices):
+        def points(indices):
             return np.array(
                 [[landmarks[i].x * w, landmarks[i].y * h] for i in indices],
                 dtype=np.float32,
             )
 
-        left = calculate_ear_from_landmarks(eye_points(LEFT_EYE_INDICES))
-        right = calculate_ear_from_landmarks(eye_points(RIGHT_EYE_INDICES))
-        return (left + right) / 2.0
+        left = calculate_ear_from_landmarks(points(LEFT_EYE_INDICES))
+        right = calculate_ear_from_landmarks(points(RIGHT_EYE_INDICES))
+        upper, lower, corner_l, corner_r = points(MOUTH_INDICES)
+        width = float(np.linalg.norm(corner_l - corner_r))
+        mar = float(np.linalg.norm(upper - lower)) / width if width > 1e-6 else None
+        return {"ear": (left + right) / 2.0, "mar": mar}
+
+    def get_ear(self, face_image) -> float | None:
+        m = self.measure(face_image)
+        return m["ear"] if m else None
 
     def close(self) -> None:
         try:

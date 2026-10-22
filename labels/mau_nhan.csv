@@ -1,0 +1,5 @@
+student_id,behavior,start,end,note
+HS001,Cúi đầu lâu,0:01:05,0:01:20,ví dụ — xóa các dòng mẫu này
+HS001,Viết bài,0:02:00,0:03:10,cúi viết — không phải cúi đầu lâu
+HS014,Ngủ gục,00:05:30,00:07:00,
+ID37,Quay đầu,425,431,track chưa nhận diện: dùng ID<track>

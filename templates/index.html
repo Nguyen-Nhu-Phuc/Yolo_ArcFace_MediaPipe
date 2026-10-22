@@ -3,131 +3,261 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>YOLOv12 + ArcFace — theo dõi tập trung trong lớp</title>
+<title>Theo dõi lớp học — YOLOv12 + ArcFace</title>
 <style>
+:root {
+  --bg: #0b1120;
+  --surface: #121a2b;
+  --surface-2: #182236;
+  --surface-3: #22304a;
+  --border: #25324a;
+  --text: #e6ebf3;
+  --muted: #8a96ad;
+  --faint: #5b6780;
+  --accent: #3b82f6;
+  --accent-2: #60a5fa;
+  --ok: #22c55e;
+  --ok-text: #4ade80;
+  --ok-soft: rgba(34, 197, 94, .14);
+  --bad: #ef4444;
+  --bad-text: #f87171;
+  --bad-soft: rgba(239, 68, 68, .14);
+  --warn: #f59e0b;
+  --warn-text: #fbbf24;
+  --warn-soft: rgba(245, 158, 11, .14);
+  --info: #38bdf8;
+  --radius: 12px;
+}
 * { box-sizing: border-box; margin: 0; padding: 0; }
-body { font-family: "Segoe UI", system-ui, sans-serif; background: #0f172a; color: #e2e8f0; }
-.header { background: #1e293b; padding: 10px 16px; display: flex; align-items: center; gap: 14px; border-bottom: 1px solid #334155; flex-wrap: wrap; min-height: 56px; }
-.header h1 { font-size: 17px; color: #38bdf8; white-space: nowrap; }
-.header a { color: #2dd4a8; font-size: 13px; text-decoration: none; white-space: nowrap; }
-.controls { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-.controls input { padding: 6px 10px; border: 1px solid #475569; border-radius: 4px; background: #0f172a; color: #e2e8f0; font-size: 13px; width: 340px; }
-.controls button { padding: 6px 14px; border: none; border-radius: 4px; cursor: pointer; font-size: 13px; font-weight: 500; color: #fff; }
+html, body { height: 100%; }
+body { font-family: "Segoe UI", system-ui, -apple-system, sans-serif; font-size: 13px; background: var(--bg); color: var(--text); display: flex; flex-direction: column; overflow: hidden; }
+button, input, select { font: inherit; }
+svg { flex-shrink: 0; }
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-thumb { background: #2a3752; border-radius: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+
+/* ---------- Thanh trên ---------- */
+.header { display: flex; align-items: center; gap: 12px; padding: 10px 16px; background: var(--surface); border-bottom: 1px solid var(--border); flex-wrap: wrap; flex-shrink: 0; }
+.brand { display: flex; align-items: center; gap: 10px; }
+.brand-logo { width: 34px; height: 34px; border-radius: 9px; background: linear-gradient(135deg, #3b82f6, #22c55e); display: grid; place-items: center; }
+.brand-logo svg { width: 20px; height: 20px; }
+.brand h1 { font-size: 15px; font-weight: 700; white-space: nowrap; }
+.brand small { display: block; font-size: 11px; color: var(--muted); white-space: nowrap; }
+.source-bar { display: flex; align-items: center; gap: 6px; padding: 4px; background: var(--bg); border: 1px solid var(--border); border-radius: 10px; flex: 1 1 480px; min-width: 0; max-width: 760px; }
+.source-bar select, .source-bar input { height: 32px; padding: 0 10px; border: 1px solid transparent; border-radius: 7px; background: var(--surface-2); color: var(--text); outline: none; }
+.source-bar select { min-width: 120px; max-width: 200px; cursor: pointer; }
+.source-bar input { flex: 1; min-width: 120px; }
+.source-bar select:focus, .source-bar input:focus { border-color: var(--accent); }
+.btn { height: 32px; padding: 0 14px; border: 1px solid transparent; border-radius: 8px; cursor: pointer; font-weight: 600; color: #fff; white-space: nowrap; display: inline-flex; align-items: center; gap: 6px; transition: background .15s, opacity .15s; }
+.btn svg { width: 15px; height: 15px; }
+.btn:disabled { opacity: .45; cursor: not-allowed; }
+.btn-icon { width: 32px; padding: 0; justify-content: center; }
+.btn-ghost { background: var(--surface-2); color: var(--text); border-color: var(--border); }
+.btn-ghost:hover:not(:disabled) { background: var(--surface-3); }
 .btn-connect { background: #16a34a; }
-.btn-connect:hover { background: #15803d; }
+.btn-connect:hover:not(:disabled) { background: #15803d; }
 .btn-stop { background: #dc2626; }
-.btn-stop:hover { background: #b91c1c; }
-.btn-upload { background: #2563eb; }
-.btn-upload:hover { background: #1d4ed8; }
-.btn-excel { background: #15803d; }
-.btn-excel:hover { background: #166534; }
-.controls button:disabled { opacity: 0.5; cursor: not-allowed; }
-.controls select { padding: 6px 8px; border: 1px solid #475569; border-radius: 4px; background: #0f172a; color: #e2e8f0; font-size: 13px; max-width: 220px; }
-.btn-cam { background: #334155; }
-.btn-cam:hover { background: #475569; }
-.upload-progress { width: 120px; height: 6px; display: none; }
-.status { font-size: 13px; padding: 4px 10px; border-radius: 10px; }
-.status.connected { background: #166534; color: #86efac; }
-.status.disconnected { background: #991b1b; color: #fca5a5; }
-.status.loading { background: #854d0e; color: #fde68a; }
-.main { display: flex; height: calc(100vh - 56px); min-height: 0; }
-.video-panel { flex: 1; background: #000; position: relative; min-width: 0; overflow: hidden; }
+.btn-stop:hover:not(:disabled) { background: #b91c1c; }
+.btn-upload { background: var(--accent); }
+.btn-upload:hover:not(:disabled) { background: #2563eb; }
+.btn-excel { background: #0f766e; }
+.btn-excel:hover:not(:disabled) { background: #115e59; }
+.header-actions { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+.upload-progress { width: 90px; height: 6px; display: none; accent-color: var(--accent); }
+.status { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 12px; border-radius: 14px; font-size: 12px; font-weight: 600; white-space: nowrap; }
+.status::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
+.status.connected { background: var(--ok-soft); color: var(--ok-text); }
+.status.connected::before { animation: pulse 1.6s infinite; }
+.status.disconnected { background: var(--bad-soft); color: var(--bad-text); }
+.status.loading { background: var(--warn-soft); color: var(--warn-text); }
+@keyframes pulse { 50% { opacity: .3; } }
+.link-enroll { color: var(--accent-2); text-decoration: none; font-weight: 600; white-space: nowrap; padding: 6px 10px; border-radius: 8px; }
+.link-enroll:hover { background: var(--surface-2); }
+
+/* ---------- Bố cục ---------- */
+.main { flex: 1; min-height: 0; display: flex; gap: 12px; padding: 12px; }
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); }
+
+/* ---------- Video ---------- */
+.video-panel { flex: 1; min-width: 0; position: relative; overflow: hidden; background: #000; border: 1px solid var(--border); border-radius: var(--radius); }
+.video-panel:fullscreen { border: 0; border-radius: 0; }
 .video-panel img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
 .video-panel.fit-cover img { object-fit: cover; }
-.video-panel .placeholder { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: #475569; font-size: 14px; text-align: center; padding: 20px; }
-.vp-tools { position: absolute; top: 10px; right: 10px; z-index: 3; display: flex; gap: 8px; opacity: 0.35; transition: opacity .2s ease; }
+.placeholder { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding: 24px; text-align: center; color: var(--faint); background: radial-gradient(circle at center, #111a2c 0%, #05080f 72%); }
+.placeholder svg { width: 56px; height: 56px; opacity: .55; }
+.placeholder > b { color: var(--muted); font-size: 15px; font-weight: 600; }
+.placeholder span b { color: var(--text); }
+.vp-tools { position: absolute; top: 12px; right: 12px; z-index: 3; display: flex; gap: 6px; opacity: .4; transition: opacity .2s; }
 .video-panel:hover .vp-tools { opacity: 1; }
-.vp-tools button { padding: 7px 12px; font-size: 12px; border-radius: 8px; cursor: pointer; color: #fff; background: rgba(10,12,16,0.75); border: 1px solid rgba(255,255,255,0.2); }
-.vp-tools button:hover { background: rgba(37,99,235,0.85); }
-.hud { position: absolute; top: 10px; left: 10px; z-index: 3; display: none; gap: 14px; padding: 7px 12px; border-radius: 8px; background: rgba(10,12,16,0.75); font-size: 14px; pointer-events: none; }
-.hud b { color: #38bdf8; }
+.vp-tools button { height: 30px; padding: 0 12px; font-size: 12px; font-weight: 600; border-radius: 8px; cursor: pointer; color: #fff; background: rgba(10, 14, 24, .72); border: 1px solid rgba(255, 255, 255, .16); backdrop-filter: blur(4px); }
+.vp-tools button:hover { background: rgba(59, 130, 246, .85); }
+.hud { position: absolute; top: 12px; left: 12px; z-index: 3; display: none; gap: 16px; padding: 8px 14px; border-radius: 10px; background: rgba(10, 14, 24, .75); font-size: 14px; pointer-events: none; }
+.hud b { color: var(--info); }
 .video-panel:fullscreen .hud { display: flex; }
-.sidebar { width: 360px; background: #1e293b; display: flex; flex-direction: column; border-left: 1px solid #334155; min-height: 0; }
-.sidebar h3 { padding: 12px 16px 8px; font-size: 13px; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px; flex-shrink: 0; }
-.stats-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; padding: 0 12px 10px; flex-shrink: 0; }
-.stat-card { background: #0f172a; border-radius: 6px; padding: 8px 6px; text-align: center; }
-.stat-card .value { font-size: 20px; font-weight: 700; color: #38bdf8; }
-.stat-card .label { font-size: 10px; color: #64748b; margin-top: 2px; }
-.tabs { display: flex; gap: 4px; padding: 0 12px 8px; flex-shrink: 0; }
-.tab-btn { flex: 1; padding: 7px 6px; border: 1px solid #334155; border-radius: 6px; background: #0f172a; color: #94a3b8; font-size: 12px; cursor: pointer; }
-.tab-btn.active { background: #1d4ed8; border-color: #1d4ed8; color: #fff; font-weight: 600; }
-.tab-panel { display: none; flex: 1; min-height: 0; overflow-y: auto; padding: 0 12px 12px; }
+.legend-overlay { position: absolute; left: 12px; bottom: 12px; z-index: 3; display: none; max-width: 540px; padding: 10px 12px; border-radius: 10px; background: rgba(10, 14, 24, .88); border: 1px solid rgba(255, 255, 255, .14); }
+.legend-overlay.show { display: block; }
+.legend-overlay .ov-title { font-size: 12px; color: var(--muted); margin-bottom: 6px; }
+.legend-overlay .ov-grid { display: grid; grid-template-columns: auto 1fr auto 1fr; gap: 5px 10px; align-items: center; font-size: 12px; }
+.legend-overlay .off { opacity: .4; text-decoration: line-through; }
+
+/* ---------- Thanh bên ---------- */
+.sidebar { width: 384px; flex-shrink: 0; display: flex; flex-direction: column; gap: 10px; min-height: 0; }
+.kpis { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; flex-shrink: 0; }
+.kpi { position: relative; overflow: hidden; padding: 10px 12px 10px 14px; }
+.kpi::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--kpi, var(--accent)); }
+.kpi .label { font-size: 11px; font-weight: 600; color: var(--muted); }
+.kpi .value { font-size: 26px; font-weight: 700; line-height: 1.2; margin-top: 2px; font-variant-numeric: tabular-nums; }
+.meta-card { flex-shrink: 0; padding: 8px 12px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px 8px; }
+.meta-item .label { font-size: 11px; color: var(--faint); }
+.meta-item .value { font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.clock-row { grid-column: 1 / -1; display: flex; align-items: baseline; gap: 8px; margin-top: 4px; padding-top: 7px; border-top: 1px solid var(--border); font-size: 12px; color: var(--muted); }
+.clock-row b { color: #fde68a; font-size: 14px; font-family: Consolas, monospace; }
+.clock-row #timeSource { color: var(--faint); font-size: 11px; }
+.panel-card { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.tabs { display: flex; gap: 2px; margin: 10px 10px 8px; padding: 3px; background: var(--bg); border-radius: 9px; flex-shrink: 0; }
+.tab-btn { flex: 1; height: 30px; border: 0; border-radius: 7px; background: transparent; color: var(--muted); font-size: 12px; font-weight: 600; cursor: pointer; transition: background .15s, color .15s; }
+.tab-btn:hover { color: var(--text); }
+.tab-btn.active { background: var(--surface-3); color: #fff; box-shadow: 0 1px 3px rgba(0, 0, 0, .35); }
+.tab-panel { display: none; flex: 1; min-height: 0; overflow-y: auto; padding: 2px 10px 12px; }
 .tab-panel.active { display: block; }
-.student-row { display: flex; align-items: center; gap: 10px; padding: 8px; background: #0f172a; border-radius: 6px; margin-bottom: 6px; }
-.id-badge { min-width: 44px; height: 28px; padding: 0 6px; border-radius: 14px; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; }
-.id-badge.focused { background: #166534; color: #86efac; }
-.id-badge.unfocused { background: #991b1b; color: #fca5a5; }
-.id-badge.nopose { background: #3f3a1e; color: #fde68a; }
+.lg-section { margin: 14px 2px 8px; font-size: 11px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; }
+.lg-section:first-child { margin-top: 4px; }
+.empty { display: block; padding: 10px 2px; color: var(--faint); font-size: 12px; }
+
+/* ---------- Danh sách học sinh ---------- */
+.student-row { display: flex; align-items: center; gap: 10px; padding: 9px 10px; margin-bottom: 6px; background: var(--surface-2); border: 1px solid transparent; border-radius: 10px; transition: border-color .15s; }
+.student-row:hover { border-color: var(--border); }
+.id-badge { min-width: 50px; height: 30px; padding: 0 8px; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; }
+.id-badge.focused { background: var(--ok-soft); color: var(--ok-text); }
+.id-badge.unfocused { background: var(--bad-soft); color: var(--bad-text); }
+.id-badge.nopose { background: var(--warn-soft); color: var(--warn-text); }
 .student-row .info { flex: 1; min-width: 0; }
-.student-row .name { font-size: 12px; color: #cbd5e1; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.student-row .score { font-size: 15px; font-weight: 700; }
-.score.high { color: #86efac; }
-.score.low { color: #fca5a5; }
-.score.none { color: #94a3b8; }
-.student-row .reasons { font-size: 11px; color: #64748b; margin-top: 3px; display: flex; flex-wrap: wrap; gap: 3px; }
-.tag { display: inline-block; padding: 1px 6px; border-radius: 4px; font-size: 11px; font-weight: 600; line-height: 1.5; cursor: help; }
-.tag.neg { background: #4c1d1d; color: #fca5a5; }
-.tag.pos { background: #14432a; color: #86efac; }
-.tag.ok { background: #1e293b; color: #94a3b8; cursor: default; }
-.tag.lock { background: #1e3a8a; color: #bfdbfe; margin-left: 4px; font-size: 10px; vertical-align: 1px; }
-.lg-row { display: grid; grid-template-columns: 64px 1fr 34px 38px; gap: 8px; align-items: start; padding: 7px 8px; background: #0f172a; border-radius: 6px; margin-bottom: 5px; transition: opacity .15s; }
-.lg-row.off { opacity: 0.45; }
+.student-row .name { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.student-row .score { font-size: 14px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.score.high { color: var(--ok-text); }
+.score.low { color: var(--bad-text); }
+.score.none { color: var(--muted); }
+.student-row .reasons { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 5px; }
+.tag { display: inline-block; padding: 1px 7px; border-radius: 6px; font-size: 11px; font-weight: 600; line-height: 1.6; cursor: help; }
+.tag.neg { background: var(--bad-soft); color: #fca5a5; }
+.tag.pos { background: var(--ok-soft); color: #86efac; }
+.tag.ok { background: var(--surface-3); color: var(--muted); cursor: default; }
+.tag.lock { background: rgba(59, 130, 246, .2); color: #bfdbfe; margin-left: 4px; font-size: 10px; vertical-align: 1px; }
+.legend-inline { display: flex; flex-wrap: wrap; gap: 6px 14px; margin: 4px 2px 10px; font-size: 11px; color: var(--muted); }
+.legend-inline i { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
+
+/* ---------- Tab Lớp học ---------- */
+.att-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.mini { background: var(--surface-2); border-radius: 10px; padding: 10px 12px; }
+.mini .label { font-size: 11px; font-weight: 600; color: var(--muted); }
+.mini .value { font-size: 22px; font-weight: 700; margin-top: 2px; font-variant-numeric: tabular-nums; }
+.mini.present .value { color: var(--ok-text); }
+.mini.absent .value { color: var(--bad-text); }
+.trend { background: var(--surface-2); border-radius: 10px; padding: 10px; }
+.trend svg { display: block; width: 100%; height: 70px; }
+.trend-axis { display: flex; justify-content: space-between; margin-top: 4px; font-size: 10px; color: var(--faint); font-family: Consolas, monospace; }
+.focus-bar { height: 5px; margin-top: 6px; border-radius: 3px; background: var(--surface-3); overflow: hidden; }
+.focus-bar i { display: block; height: 100%; width: 0; background: var(--ok); transition: width .4s; }
+.att-meta { margin-top: 4px; font-size: 11px; color: var(--muted); }
+.on-frame { display: inline-block; width: 7px; height: 7px; margin-left: 6px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 0 3px var(--ok-soft); vertical-align: 1px; }
+.chips { display: flex; flex-wrap: wrap; gap: 5px; }
+.chip { padding: 3px 9px; border-radius: 12px; background: var(--surface-2); border: 1px solid var(--border); font-size: 11px; color: #cbd5e1; }
+.att-note { margin-top: 10px; font-size: 11px; color: var(--faint); line-height: 1.5; }
+
+/* ---------- Tab Hành vi ---------- */
+.lg-actions { display: flex; gap: 6px; margin-bottom: 8px; }
+.lg-actions button { flex: 1; height: 30px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-2); color: var(--text); font-size: 12px; font-weight: 600; cursor: pointer; }
+.lg-actions button:hover { background: var(--accent); border-color: var(--accent); color: #fff; }
+.lg-row { display: grid; grid-template-columns: 64px 1fr 34px 38px; gap: 8px; align-items: start; padding: 8px 10px; margin-bottom: 6px; background: var(--surface-2); border-radius: 10px; transition: opacity .15s; }
+.lg-row.off { opacity: .45; }
 .lg-row.off .lg-name { text-decoration: line-through; }
+.lg-row .tag { text-align: center; cursor: default; }
+.lg-row .lg-name { font-size: 12px; font-weight: 600; }
+.lg-row .lg-cond { margin-top: 2px; font-size: 11px; color: var(--muted); line-height: 1.4; }
+.lg-row .lg-pen { font-size: 12px; font-weight: 700; text-align: right; color: var(--bad-text); }
+.lg-row .lg-pen.zero { color: var(--ok-text); }
 .switch { position: relative; width: 36px; height: 20px; margin-top: 1px; }
 .switch input { opacity: 0; width: 0; height: 0; }
 .switch span { position: absolute; inset: 0; border-radius: 10px; background: #475569; cursor: pointer; transition: background .15s; }
 .switch span::before { content: ""; position: absolute; left: 3px; top: 3px; width: 14px; height: 14px; border-radius: 50%; background: #fff; transition: transform .15s; }
-.switch input:checked + span { background: #16a34a; }
+.switch input:checked + span { background: var(--ok); }
 .switch input:checked + span::before { transform: translateX(16px); }
 .switch input:disabled + span { cursor: wait; }
-.lg-actions { display: flex; gap: 6px; margin-bottom: 8px; }
-.lg-actions button { flex: 1; padding: 6px; border: 1px solid #334155; border-radius: 6px; background: #0f172a; color: #cbd5e1; font-size: 12px; cursor: pointer; }
-.lg-actions button:hover { background: #1d4ed8; border-color: #1d4ed8; color: #fff; }
-.legend-overlay .off { opacity: 0.4; text-decoration: line-through; }
-.lg-row .tag { text-align: center; cursor: default; }
-.lg-row .lg-name { font-size: 12px; color: #e2e8f0; font-weight: 600; }
-.lg-row .lg-cond { font-size: 11px; color: #64748b; margin-top: 2px; line-height: 1.4; }
-.lg-row .lg-pen { font-size: 12px; font-weight: 700; text-align: right; color: #fca5a5; }
-.lg-row .lg-pen.zero { color: #86efac; }
-.lg-section { font-size: 11px; color: #94a3b8; text-transform: uppercase; letter-spacing: .4px; margin: 10px 0 6px; }
-.lg-box { display: flex; gap: 8px; align-items: center; font-size: 12px; color: #cbd5e1; padding: 4px 8px; }
-.lg-box i { width: 14px; height: 14px; border: 3px solid; border-radius: 2px; flex-shrink: 0; }
-.legend-overlay { position: absolute; left: 10px; bottom: 10px; z-index: 3; display: none; max-width: 520px; padding: 10px 12px; border-radius: 10px; background: rgba(10,12,16,0.85); border: 1px solid rgba(255,255,255,0.15); }
-.legend-overlay.show { display: block; }
-.legend-overlay .ov-grid { display: grid; grid-template-columns: auto 1fr auto 1fr; gap: 5px 10px; align-items: center; font-size: 12px; color: #e2e8f0; }
-.legend-overlay .ov-title { font-size: 12px; color: #94a3b8; margin-bottom: 6px; }
-.log-entry { font-size: 11px; color: #64748b; padding: 2px 0; font-family: Consolas, monospace; word-break: break-all; }
-.empty { color: #475569; font-size: 13px; }
-.legend { padding: 0 12px 10px; font-size: 11px; color: #64748b; line-height: 1.6; flex-shrink: 0; }
-.clock { margin: 0 12px 10px; padding: 8px 10px; background: #0f172a; border-radius: 6px; font-size: 12px; color: #94a3b8; flex-shrink: 0; }
-.clock b { color: #fde68a; font-size: 14px; font-family: Consolas, monospace; }
-.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; vertical-align: -1px; }
+.lg-box { display: flex; gap: 8px; align-items: center; padding: 5px 4px; font-size: 12px; color: #cbd5e1; }
+.lg-box i { width: 14px; height: 14px; border: 3px solid; border-radius: 3px; flex-shrink: 0; }
+
+/* ---------- Tab Nhận diện ---------- */
+.th-row { padding: 10px 12px; margin-bottom: 8px; background: var(--surface-2); border-radius: 10px; }
+.th-head { display: flex; justify-content: space-between; align-items: baseline; font-size: 12px; font-weight: 600; }
+.th-head b { font-size: 16px; color: var(--accent-2); font-variant-numeric: tabular-nums; }
+.th-row input[type=range] { width: 100%; margin: 8px 0 4px; accent-color: var(--accent); cursor: pointer; }
+.th-help { font-size: 11px; color: var(--muted); line-height: 1.45; }
+.th-stats { margin: 2px 2px 10px; font-size: 11px; color: var(--faint); line-height: 1.5; }
+.th-stats b { color: #cbd5e1; }
+.lg-actions button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.lg-actions button:disabled { opacity: .45; cursor: not-allowed; }
+#thDirty { display: none; margin: 0 2px 8px; font-size: 11px; color: var(--warn-text); }
+
+/* ---------- Nhật ký ---------- */
+#logPanel { background: var(--bg); border-radius: 8px; padding: 8px 10px; min-height: 100%; }
+.log-entry { padding: 2px 0; font-size: 11px; color: var(--muted); font-family: Consolas, monospace; word-break: break-all; }
+
+@media (max-width: 1360px) {
+  .brand small { display: none; }
+  .sidebar { width: 350px; }
+  .kpi .value { font-size: 22px; }
+}
 </style>
 </head>
 <body>
 
-<div class="header">
-  <h1>YOLOv12 + ArcFace — Theo dõi tập trung</h1>
-  <div class="controls">
+<header class="header">
+  <div class="brand">
+    <div class="brand-logo">
+      <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>
+    </div>
+    <div>
+      <h1>Theo dõi lớp học</h1>
+      <small>YOLOv12 · ArcFace · Pose</small>
+    </div>
+  </div>
+
+  <div class="source-bar">
     <select id="camSelect" title="Camera trên máy — ưu tiên OBS Virtual Camera (OBS: Start Virtual Camera → Làm mới)">
       <option value="">Đang tải camera…</option>
     </select>
-    <button class="btn-cam" id="btnRefreshCams" onclick="refreshCameras(true)" title="OBS: Start Virtual Camera rồi bấm Làm mới">Làm mới camera</button>
+    <button class="btn btn-ghost btn-icon" id="btnRefreshCams" onclick="refreshCameras(true)" title="Làm mới danh sách camera (OBS: Start Virtual Camera rồi bấm)" aria-label="Làm mới camera">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg>
+    </button>
     <input id="videoSource" value="0" placeholder="0, rtsp://... hoặc đường dẫn video" title="0 = webcam; rtsp://... = camera IP; hoặc đường dẫn file video">
-    <button class="btn-connect" id="btnConnect" onclick="connect()">Kết nối</button>
-    <button class="btn-stop" id="btnStop" onclick="disconnect()" disabled>Dừng</button>
-    <input type="file" id="fileInput" accept="video/*,.mp4,.avi,.mov,.mkv,.webm,.m4v,.mts,.m2ts" style="display:none" onchange="uploadVideo(this.files[0])">
-    <button class="btn-upload" id="btnUpload" onclick="document.getElementById('fileInput').click()">Tải video lên</button>
-    <progress class="upload-progress" id="uploadProgress" max="100" value="0"></progress>
-    <button class="btn-excel" id="btnExcel" onclick="downloadReport()" disabled title="Tải file Excel hành vi từng học sinh (theo ngày giờ trên video)">Xuất Excel</button>
+    <button class="btn btn-connect" id="btnConnect" onclick="connect()">Kết nối</button>
+    <button class="btn btn-stop" id="btnStop" onclick="disconnect()" disabled>Dừng</button>
   </div>
-  <span class="status disconnected" id="statusBadge">Chưa kết nối</span>
-  <a href="/enroll">Nạp học sinh mới + test webcam →</a>
-</div>
 
-<div class="main">
-  <div class="video-panel" id="videoPanel">
-    <span class="placeholder" id="placeholder">Kết nối nguồn video hoặc tải video lên để bắt đầu theo dõi</span>
+  <div class="header-actions">
+    <input type="file" id="fileInput" accept="video/*,.mp4,.avi,.mov,.mkv,.webm,.m4v,.mts,.m2ts" style="display:none" onchange="uploadVideo(this.files[0])">
+    <button class="btn btn-upload" id="btnUpload" onclick="document.getElementById('fileInput').click()">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M17 8l-5-5-5 5"/><path d="M12 3v12"/></svg>
+      Tải video lên
+    </button>
+    <progress class="upload-progress" id="uploadProgress" max="100" value="0"></progress>
+    <button class="btn btn-excel" id="btnExcel" onclick="downloadReport()" disabled title="Tải file Excel hành vi từng học sinh (theo ngày giờ trên video)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M8 13l4 5M12 13l-4 5"/></svg>
+      Xuất Excel
+    </button>
+    <span class="status disconnected" id="statusBadge">Chưa kết nối</span>
+    <a class="link-enroll" href="/enroll" title="Nạp học sinh mới + test nhận diện bằng webcam">Nạp học sinh →</a>
+  </div>
+</header>
+
+<main class="main">
+  <section class="video-panel" id="videoPanel">
+    <div class="placeholder" id="placeholder">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg>
+      <b>Chưa có nguồn video</b>
+      <span>Chọn camera rồi bấm <b>Kết nối</b>, hoặc bấm <b>Tải video lên</b> để bắt đầu theo dõi</span>
+    </div>
     <img id="frameImg" alt="" style="display:none">
     <div class="hud">
       <span>Trên khung: <b id="hCount">-</b></span>
@@ -137,7 +267,7 @@ body { font-family: "Segoe UI", system-ui, sans-serif; background: #0f172a; colo
       <span><b id="hTime"></b></span>
     </div>
     <div class="legend-overlay" id="legendOverlay">
-      <div class="ov-title">Chú thích nhãn trên video: <b>HS12 85 · Cúi</b> = mã HS · điểm · hành vi chính</div>
+      <div class="ov-title">Chú thích nhãn trên video: <b>HS012 85 · Cúi đầu lâu</b> = mã HS · điểm · hành vi chính</div>
       <div class="ov-grid" id="legendOverlayGrid"></div>
     </div>
     <div class="vp-tools">
@@ -145,53 +275,111 @@ body { font-family: "Segoe UI", system-ui, sans-serif; background: #0f172a; colo
       <button type="button" id="btnFit" title="Phím C">Lấp đầy</button>
       <button type="button" id="btnFull" title="Phím F hoặc nhấp đúp vào video">Toàn màn hình</button>
     </div>
-  </div>
-  <div class="sidebar">
-    <h3>Tổng quan</h3>
-    <div class="stats-grid">
-      <div class="stat-card"><div class="value" id="studentCount">-</div><div class="label">Trên khung</div></div>
-      <div class="stat-card"><div class="value" id="focusedCount">-</div><div class="label">Tập trung</div></div>
-      <div class="stat-card"><div class="value" id="avgScore">-</div><div class="label">Điểm TB</div></div>
-      <div class="stat-card"><div class="value" id="namedCount">-</div><div class="label">Đã gán tên (khóa cứng)</div></div>
-      <div class="stat-card"><div class="value" id="analysisMs">-</div><div class="label">Phân tích (ms)</div></div>
-      <div class="stat-card"><div class="value" id="frameIdx">-</div><div class="label">Khung</div></div>
-    </div>
-    <div class="clock">Giờ trên video: <b id="videoTime">—</b> <span id="timeSource"></span></div>
-    <div class="legend">
-      <i style="background:#28c850"></i>Tập trung (≥50)
-      &nbsp; <i style="background:#eb3c3c"></i>Mất tập trung
-      &nbsp; <i style="background:#46a0c8"></i>Chưa thấy tư thế
+  </section>
+
+  <aside class="sidebar">
+    <div class="kpis">
+      <div class="card kpi" style="--kpi: var(--info)"><div class="label">Trên khung</div><div class="value" id="studentCount">-</div></div>
+      <div class="card kpi" style="--kpi: var(--ok)"><div class="label">Tập trung</div><div class="value" id="focusedCount">-</div></div>
+      <div class="card kpi" style="--kpi: var(--warn)"><div class="label">Điểm TB</div><div class="value" id="avgScore">-</div></div>
     </div>
 
-    <div class="tabs">
-      <button class="tab-btn active" data-tab="students" onclick="showTab('students')">Trên khung</button>
-      <button class="tab-btn" data-tab="legend" onclick="showTab('legend')">Hành vi</button>
-      <button class="tab-btn" data-tab="log" onclick="showTab('log')">Nhật ký</button>
+    <div class="card meta-card">
+      <div class="meta-item"><div class="label">Đã gán tên (khóa)</div><div class="value" id="namedCount">-</div></div>
+      <div class="meta-item"><div class="label">Phân tích (ms)</div><div class="value" id="analysisMs">-</div></div>
+      <div class="meta-item"><div class="label">Khung</div><div class="value" id="frameIdx">-</div></div>
+      <div class="clock-row">Giờ trên video <b id="videoTime">—</b> <span id="timeSource"></span></div>
     </div>
 
-    <div class="tab-panel active" id="tab-students">
-      <div id="studentList"><span class="empty">Chưa có dữ liệu</span></div>
-    </div>
-    <div class="tab-panel" id="tab-legend">
-      <div class="lg-section">Bật / tắt hành vi — áp dụng ngay, lưu cho lần sau</div>
-      <div class="lg-actions">
-        <button type="button" onclick="setAllBehaviors(true)">Bật tất cả</button>
-        <button type="button" onclick="setAllBehaviors(false)">Tắt tất cả</button>
+    <div class="card panel-card">
+      <div class="tabs">
+        <button class="tab-btn active" data-tab="class" onclick="showTab('class')">Lớp học</button>
+        <button class="tab-btn" data-tab="students" onclick="showTab('students')">Trên khung</button>
+        <button class="tab-btn" data-tab="legend" onclick="showTab('legend')">Hành vi</button>
+        <button class="tab-btn" data-tab="arcface" onclick="showTab('arcface')">Nhận diện</button>
+        <button class="tab-btn" data-tab="log" onclick="showTab('log')">Nhật ký</button>
       </div>
-      <div id="legendList"><span class="empty">Đang tải chú thích...</span></div>
-      <div class="lg-section">Màu khung &amp; nhãn trên video</div>
-      <div class="lg-box"><i style="border-color:#28c850"></i>Tập trung (điểm ≥ <span class="lgThreshold">50</span>)</div>
-      <div class="lg-box"><i style="border-color:#eb3c3c"></i>Mất tập trung (điểm &lt; <span class="lgThreshold">50</span>) — viền dày = cúi đầu lâu</div>
-      <div class="lg-box"><i style="border-color:#46a0c8"></i>Chưa lấy được tư thế, chưa chấm điểm</div>
-      <div class="lg-box"><b>HS12 85 · Cúi</b>&nbsp;= mã học sinh · điểm tập trung (0–100) · hành vi chính</div>
-      <div class="lg-box"><b>ID7</b>&nbsp;= chưa nhận diện được học sinh (số theo dõi tạm)</div>
-      <div class="lg-box"><span class="tag lock" style="margin-left:0">khóa</span>&nbsp;= khóa cứng mã HS (ArcFace ≥ 45% và hơn người khớp nhì ≥ 10%) — chỉ đổi khi HS khác khớp % cao hơn</div>
+
+      <div class="tab-panel active" id="tab-class">
+        <div class="att-grid">
+          <div class="mini present">
+            <div class="label">Có mặt / sĩ số</div>
+            <div class="value" id="attPresent">-</div>
+            <div class="focus-bar"><i id="attPresentBar"></i></div>
+          </div>
+          <div class="mini absent"><div class="label">Vắng / chưa nhận diện</div><div class="value" id="attAbsent">-</div></div>
+          <div class="mini"><div class="label">Điểm chú ý TB cả phiên</div><div class="value" id="attClassAvg">-</div></div>
+          <div class="mini"><div class="label">% thời gian tập trung</div><div class="value" id="attFocusPct">-</div></div>
+        </div>
+        <div class="lg-section">Mức chú ý cả lớp theo phút</div>
+        <div class="trend" id="attTrend"><span class="empty">Chưa có dữ liệu</span></div>
+        <div class="lg-section">Có mặt — chú ý thấp xếp trước</div>
+        <div id="attList"><span class="empty">Chưa nhận diện được học sinh nào</span></div>
+        <div class="lg-section">Vắng / chưa nhận diện (<span id="attAbsentN">0</span>)</div>
+        <div class="chips" id="attAbsentList"><span class="empty">—</span></div>
+        <div class="att-note" id="attNote"></div>
+      </div>
+
+      <div class="tab-panel" id="tab-students">
+        <div class="legend-inline">
+          <span><i style="background:#28c850"></i>Tập trung (≥ <span class="lgThreshold">50</span>)</span>
+          <span><i style="background:#eb3c3c"></i>Mất tập trung</span>
+          <span><i style="background:#46a0c8"></i>Chưa thấy tư thế</span>
+        </div>
+        <div id="studentList"><span class="empty">Chưa có dữ liệu</span></div>
+      </div>
+
+      <div class="tab-panel" id="tab-legend">
+        <div class="lg-section">Bật / tắt hành vi — áp dụng ngay, lưu cho lần sau</div>
+        <div class="lg-actions">
+          <button type="button" onclick="setAllBehaviors(true)">Bật tất cả</button>
+          <button type="button" onclick="setAllBehaviors(false)">Tắt tất cả</button>
+        </div>
+        <div id="legendList"><span class="empty">Đang tải chú thích...</span></div>
+        <div class="lg-section">Màu khung &amp; nhãn trên video</div>
+        <div class="lg-box"><i style="border-color:#28c850"></i>Tập trung (điểm ≥ <span class="lgThreshold">50</span>)</div>
+        <div class="lg-box"><i style="border-color:#eb3c3c"></i>Mất tập trung (điểm &lt; <span class="lgThreshold">50</span>) — viền dày = cúi đầu lâu</div>
+        <div class="lg-box"><i style="border-color:#46a0c8"></i>Chưa lấy được tư thế, chưa chấm điểm</div>
+        <div class="lg-box"><b>HS012 85 · Cúi đầu lâu</b>&nbsp;= mã học sinh · điểm tập trung (0–100) · hành vi chính</div>
+        <div class="lg-box"><b>ID7</b>&nbsp;= chưa nhận diện được học sinh (số theo dõi tạm)</div>
+        <div class="lg-box"><span class="tag lock" style="margin-left:0">khóa</span>&nbsp;= khóa cứng mã HS (ArcFace ≥ <span class="lgHardPct">45</span>% và hơn người khớp nhì ≥ <span class="lgHardMargin">10</span>%) — chỉ đổi khi HS khác khớp % cao hơn</div>
+      </div>
+
+      <div class="tab-panel" id="tab-arcface">
+        <div class="lg-section">Ngưỡng ArcFace — áp dụng ngay, lưu cho lần sau</div>
+        <div class="th-row">
+          <div class="th-head"><span>Ngưỡng nhận diện</span><b><span id="thMatchVal">-</span>%</b></div>
+          <input type="range" id="thMatch" min="10" max="80" step="1">
+          <div class="th-help">Mặt giống ảnh mẫu từ mức này trở lên mới gắn tên. Thấp: nhận ra được nhiều em hơn nhưng dễ gắn nhầm tên;
+            cao: ít nhầm hơn nhưng em ngồi xa / nghiêng mặt có thể không được nhận ra (bị tính vắng).</div>
+        </div>
+        <div class="th-row">
+          <div class="th-head"><span>Ngưỡng khóa cứng</span><b><span id="thHardVal">-</span>%</b></div>
+          <input type="range" id="thHard" min="10" max="90" step="1">
+          <div class="th-help">Khớp từ mức này trở lên (và hơn người khớp nhì đủ xa) thì giữ chặt mã HS, chỉ đổi khi HS khác
+            khớp cao hơn. Không thấp hơn ngưỡng nhận diện.</div>
+        </div>
+        <div class="th-row">
+          <div class="th-head"><span>Chênh lệch tối thiểu để khóa cứng</span><b><span id="thMarginVal">-</span>%</b></div>
+          <input type="range" id="thMargin" min="0" max="30" step="1">
+          <div class="th-help">Người khớp nhất phải hơn người khớp thứ hai ít nhất mức này.</div>
+        </div>
+        <div class="th-stats" id="thStats"></div>
+        <div id="thDirty">Chưa áp dụng — bấm Áp dụng để lưu.</div>
+        <div class="lg-actions">
+          <button type="button" class="primary" id="thApply" onclick="saveThresholds()">Áp dụng</button>
+          <button type="button" id="thReset" onclick="loadThresholds()">Hoàn tác</button>
+        </div>
+        <div class="att-note">Nâng ngưỡng khi đang chạy: các em đang có tên nhưng khớp dưới ngưỡng mới sẽ bị bỏ tên và nhận diện lại.
+          Hạ ngưỡng: áp dụng cho các lần nhận diện tiếp theo.</div>
+      </div>
+
+      <div class="tab-panel" id="tab-log">
+        <div id="logPanel"></div>
+      </div>
     </div>
-    <div class="tab-panel" id="tab-log">
-      <div id="logPanel"></div>
-    </div>
-  </div>
-</div>
+  </aside>
+</main>
 
 <script>
 let ws = null;
@@ -227,7 +415,7 @@ function reasonTags(reasons) {
     const lg = legendOf(r);
     const cls = lg && lg.positive ? 'pos' : 'neg';
     const tip = lg && lg.condition ? `${r} — ${lg.condition}` : r;
-    return `<span class="tag ${cls}" title="${esc(tip)}">${esc(lg ? lg.short : r)}</span>`;
+    return `<span class="tag ${cls}" title="${esc(tip)}">${esc(lg ? lg.name : r)}</span>`;
   }).join('');
 }
 
@@ -240,8 +428,8 @@ function renderLegend(data) {
     const pen = l.penalty ? `−${l.penalty}` : '0';
     const on = l.enabled !== false;
     return `<div class="lg-row ${on ? '' : 'off'}">` +
-      `<span class="tag ${l.positive ? 'pos' : 'neg'}">${esc(l.short)}</span>` +
-      `<div><div class="lg-name">${esc(l.name)}</div><div class="lg-cond">${esc(l.condition || '')}</div></div>` +
+      `<span class="tag ${l.positive ? 'pos' : 'neg'}">${esc(l.name)}</span>` +
+      `<div><div class="lg-cond">${esc(l.condition || '')}</div></div>` +
       `<div class="lg-pen ${l.penalty ? '' : 'zero'}" title="Điểm trừ">${pen}</div>` +
       `<label class="switch" title="${on ? 'Đang bật — bấm để tắt' : 'Đang tắt — bấm để bật'}">` +
         `<input type="checkbox" data-name="${esc(l.name)}" ${on ? 'checked' : ''}><span></span></label>` +
@@ -249,8 +437,8 @@ function renderLegend(data) {
   }).join('');
   document.getElementById('legendOverlayGrid').innerHTML = LEGEND.map(l => {
     const off = l.enabled === false ? ' off' : '';
-    return `<span class="tag ${l.positive ? 'pos' : 'neg'}${off}">${esc(l.short)}</span>` +
-      `<span class="${off}">${esc(l.name)}${l.penalty ? ` (−${l.penalty})` : ''}</span>`;
+    return `<span class="tag ${l.positive ? 'pos' : 'neg'}${off}">${esc(l.name)}</span>` +
+      `<span class="${off}">${l.penalty ? `−${l.penalty} điểm` : 'không trừ điểm'}</span>`;
   }).join('');
 }
 
@@ -265,7 +453,7 @@ async function postBehaviors(body) {
     const data = await res.json();
     if (!res.ok) throw new Error(data.detail || res.status);
     renderLegend(data);
-    const off = data.behaviors.filter(b => !b.enabled).map(b => b.short);
+    const off = data.behaviors.filter(b => !b.enabled).map(b => b.name);
     log('Hành vi đang tắt: ' + (off.length ? off.join(', ') : 'không có'));
   } catch (err) {
     log('Không đổi được bật/tắt hành vi: ' + err.message);
@@ -281,6 +469,67 @@ document.getElementById('legendList').addEventListener('change', (e) => {
 });
 
 fetch('/api/behaviors').then(r => r.json()).then(renderLegend).catch(() => renderLegend(null));
+
+// ---------- Ngưỡng ArcFace ----------
+const TH_INPUTS = { thMatch: 'match_pct', thHard: 'hard_lock_pct', thMargin: 'hard_lock_margin_pct' };
+let thSaved = null;
+
+function renderThresholds(data) {
+  thSaved = data;
+  for (const [id, key] of Object.entries(TH_INPUTS)) document.getElementById(id).value = Math.round(data[key]);
+  document.querySelectorAll('.lgHardPct').forEach(el => { el.textContent = Math.round(data.hard_lock_pct); });
+  document.querySelectorAll('.lgHardMargin').forEach(el => { el.textContent = Math.round(data.hard_lock_margin_pct); });
+  const stats = [`Gallery: <b>${data.gallery_size}</b> học sinh.`];
+  if (data.offdiag_mean_pct != null) {
+    stats.push(`Hai HS khác nhau trong gallery giống nhau trung bình <b>${data.offdiag_mean_pct}%</b>, ` +
+      `cặp giống nhất <b>${data.offdiag_max_pct}%</b> — ngưỡng nhận diện nên cao hơn rõ mức trung bình này.`);
+  }
+  document.getElementById('thStats').innerHTML = stats.join(' ');
+  updateThresholdLabels();
+}
+
+function updateThresholdLabels() {
+  const match = document.getElementById('thMatch');
+  const hard = document.getElementById('thHard');
+  if (+hard.value < +match.value) hard.value = match.value;
+  document.getElementById('thMatchVal').textContent = match.value;
+  document.getElementById('thHardVal').textContent = hard.value;
+  document.getElementById('thMarginVal').textContent = document.getElementById('thMargin').value;
+  const dirty = thSaved && Object.entries(TH_INPUTS).some(
+    ([id, key]) => +document.getElementById(id).value !== Math.round(thSaved[key]));
+  document.getElementById('thDirty').style.display = dirty ? 'block' : 'none';
+  document.getElementById('thApply').disabled = !dirty;
+}
+
+function loadThresholds() {
+  return fetch('/api/arcface').then(r => r.json()).then(renderThresholds)
+    .catch(err => log('Không đọc được ngưỡng ArcFace: ' + err.message));
+}
+
+async function saveThresholds() {
+  const body = {};
+  for (const [id, key] of Object.entries(TH_INPUTS)) body[key] = +document.getElementById(id).value;
+  document.getElementById('thApply').disabled = true;
+  try {
+    const res = await fetch('/api/arcface', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || res.status);
+    renderThresholds(data);
+    log(`Ngưỡng ArcFace: nhận diện ≥ ${data.match_pct}%, khóa cứng ≥ ${data.hard_lock_pct}% ` +
+      `(hơn người nhì ≥ ${data.hard_lock_margin_pct}%)` +
+      (data.dropped ? ` — bỏ tên ${data.dropped} người khớp dưới ngưỡng mới` : ''));
+  } catch (err) {
+    log('Không đổi được ngưỡng ArcFace: ' + err.message);
+    updateThresholdLabels();
+  }
+}
+
+Object.keys(TH_INPUTS).forEach(id => document.getElementById(id).addEventListener('input', updateThresholdLabels));
+loadThresholds();
 
 function esc(s) {
   return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -313,8 +562,82 @@ function setStatus(state) {
 
 function setText(id, v) { document.getElementById(id).textContent = v; }
 
+let onFrameIds = new Set();
+let lastSummary = null;
+
+function trendSvg(timeline, threshold) {
+  const W = 300, H = 64, n = timeline.length;
+  const bw = W / Math.max(n, 1);
+  const y = v => H - (v / 100) * H;
+  const bars = timeline.map((p, i) => {
+    const color = p.avg >= threshold ? '#22c55e' : '#ef4444';
+    return `<rect x="${(i * bw + 0.5).toFixed(1)}" y="${y(p.avg).toFixed(1)}" width="${Math.max(bw - 1, 1).toFixed(1)}" ` +
+      `height="${(H - y(p.avg)).toFixed(1)}" fill="${color}" opacity="0.85"><title>${esc(p.label)}: ${p.avg}</title></rect>`;
+  }).join('');
+  const ty = y(threshold).toFixed(1);
+  return `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">${bars}` +
+    `<line x1="0" x2="${W}" y1="${ty}" y2="${ty}" stroke="#fde68a" stroke-dasharray="4 3" stroke-width="1" vector-effect="non-scaling-stroke"/></svg>` +
+    `<div class="trend-axis"><span>${esc(timeline[0].label)}</span><span>ngưỡng ${threshold}</span><span>${esc(timeline[n - 1].label)}</span></div>`;
+}
+
+function renderSummary(data) {
+  if (data) lastSummary = data;
+  data = lastSummary;
+  if (!data) return;
+  const th = data.attention_threshold ?? 50;
+  const present = data.present || [];
+  const absent = data.absent || [];
+  setText('attPresent', `${present.length}/${data.roster_size}`);
+  document.getElementById('attPresentBar').style.width =
+    (data.roster_size ? Math.round(100 * present.length / data.roster_size) : 0) + '%';
+  setText('attAbsent', absent.length);
+  setText('attClassAvg', data.class_avg ?? '-');
+  setText('attFocusPct', data.class_focus_pct != null ? data.class_focus_pct + '%' : '-');
+  setText('attAbsentN', absent.length);
+
+  document.getElementById('attTrend').innerHTML = (data.timeline || []).length
+    ? trendSvg(data.timeline, th)
+    : '<span class="empty">Chưa có dữ liệu</span>';
+
+  document.getElementById('attList').innerHTML = present.length
+    ? present.slice()
+      .sort((a, b) => (a.avg_score ?? 101) - (b.avg_score ?? 101))
+      .map(s => {
+        const cls = s.avg_score == null ? 'nopose' : (s.avg_score >= th ? 'focused' : 'unfocused');
+        const scoreCls = s.avg_score == null ? 'none' : (s.avg_score >= th ? 'high' : 'low');
+        const pct = s.focus_pct ?? 0;
+        const barColor = pct >= 70 ? '#22c55e' : pct >= 40 ? '#f59e0b' : '#ef4444';
+        const dot = onFrameIds.has(s.student_id) ? '<span class="on-frame" title="Đang trên khung"></span>' : '';
+        const neg = (s.top_negative || []).map(b =>
+          `<span class="tag neg" title="${esc(b.name)}: ${b.count} lần, ${b.secs} giây">${esc(b.name)} ×${b.count}</span>`
+        ).join('');
+        const meta = s.avg_score == null
+          ? 'Chưa thấy tư thế, chưa chấm điểm'
+          : `Tập trung ${s.focus_pct}% thời gian · thấp nhất ${s.min_score}` + (s.first_seen ? ` · vào khung ${esc(s.first_seen)}` : '');
+        return '<div class="student-row">' +
+          `<div class="id-badge ${cls}">${esc(shortId(s.student_id))}</div>` +
+          '<div class="info">' +
+            `<div class="name">${esc(s.name || s.student_id)}${dot} · TB <span class="score ${scoreCls}">${s.avg_score ?? '—'}</span></div>` +
+            `<div class="focus-bar"><i style="width:${pct}%;background:${barColor}"></i></div>` +
+            `<div class="att-meta">${meta}</div>` +
+            (neg ? `<div class="reasons">${neg}</div>` : '') +
+          '</div>' +
+        '</div>';
+      }).join('')
+    : '<span class="empty">Chưa nhận diện được học sinh nào</span>';
+
+  document.getElementById('attAbsentList').innerHTML = absent.length
+    ? absent.map(s => `<span class="chip" title="${esc(s.student_id)}">${esc(s.name || s.student_id)}</span>`).join('')
+    : '<span class="empty">Đủ sĩ số</span>';
+
+  document.getElementById('attNote').textContent =
+    (data.unknown_tracks ? `${data.unknown_tracks} người trên khung chưa nhận diện được mặt (chưa tính vào có mặt). ` : '') +
+    'Sĩ số theo danh sách học sinh đã nạp (gallery ArcFace). Học sinh chưa nhận diện được mặt sẽ nằm ở mục Vắng.';
+}
+
 function renderStats(data) {
   const list = data.students || [];
+  onFrameIds = new Set(list.filter(s => s.known && s.student_id).map(s => s.student_id));
   const scored = list.filter(s => s.score != null);
   const focused = scored.filter(s => s.focused).length;
   const avg = scored.length ? Math.round(scored.reduce((a, s) => a + s.score, 0) / scored.length) : '-';
@@ -393,6 +716,7 @@ function connect() {
       return;
     }
     if (data.type === 'stats') renderStats(data);
+    else if (data.type === 'summary') renderSummary(data);
   };
 
   ws.onclose = () => {
@@ -451,7 +775,9 @@ function uploadVideo(file) {
       log('Tải lên thất bại: ' + (data.detail || xhr.status));
       return;
     }
-    log('Đã tải lên ' + data.filename + ' (' + data.frames + ' khung, ' + Number(data.fps).toFixed(1) + ' fps)');
+    log((data.duplicate ? 'Video ' + data.filename + ' đã có sẵn trên máy chủ — dùng lại, không lưu thêm bản mới'
+                        : 'Đã tải lên ' + data.filename) +
+      ' (' + data.frames + ' khung, ' + Number(data.fps).toFixed(1) + ' fps)');
     document.getElementById('videoSource').value = data.path;
     connect();
   };

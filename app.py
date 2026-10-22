@@ -10,6 +10,7 @@ Chạy: python app.py   →   http://127.0.0.1:5000
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import os
 import threading
@@ -28,20 +29,15 @@ from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile, Web
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from ultralytics import YOLO
 
-from behavior import (
-    REASON_SHORT,
-    StudentStateTracker,
-    behavior_legend,
-    calculate_attention_score,
-    is_head_down,
-)
+from analysis import FrameAnalyzer, effective_fps, fit_width, work_size
+from behavior import REASON_SHORT, behavior_legend
 from behavior_log import BehaviorRecorder
 from behavior_monitor import get_monitor, reset_monitor
-from chat_detector import detect_chat
 from config import Config, load_config, save_behavior_settings
-from face_gallery import FaceRecognizer
+from face_gallery import FaceRecognizer, load_student_classes
 from identity import IdentityTracker
-from pose_estimator import PoseEstimator
+from keypoint_log import LOG_DIR as KEYPOINT_LOG_DIR
+from keypoint_log import KeypointLogger
 from video_source import (
     capture_fps,
     create_camera_capture,
@@ -57,6 +53,7 @@ from visualizer import draw_annotations
 BASE_DIR = Path(__file__).resolve().parent
 TEMPLATES_DIR = BASE_DIR / "templates"
 UPLOAD_DIR = BASE_DIR / "static" / "uploads"
+UPLOAD_INDEX = UPLOAD_DIR / ".hashes.json"
 REPORTS_DIR = BASE_DIR / "reports"
 MAX_KEPT_REPORTS = 10
 # Đọc toàn khung tìm ngày giờ tốn ~5s CPU → thử tối đa N lần rồi bỏ
@@ -70,13 +67,9 @@ ALLOWED_VIDEO_EXTS = {".mp4", ".avi", ".mov", ".mkv", ".webm", ".m4v", ".mts", "
 MAX_UPLOAD_BYTES = 2 * 1024 ** 3
 UPLOAD_CHUNK = 1024 * 1024
 
-WORK_MAX_WIDTH = 1280  # khung được thu về độ rộng này trước khi phân tích + hiển thị
 DISPLAY_MAX_FPS = 15.0
+SUMMARY_INTERVAL_SEC = 1.0
 JPEG_QUALITY = 80
-HEAD_CROP_FRAC = 0.42  # phần trên box người dùng làm crop mặt cho EAR
-# Phân tích chậm (CPU) → mỗi lần chỉ cộng tối đa N giây vào bộ đếm hành vi,
-# để 1 lần quan sát không đủ vượt ngưỡng thời gian (vd. nhắm mắt 2s)
-MAX_BEHAVIOR_STEP_SEC = 1.0
 # ArcFace nghỉ = tỉ lệ × thời gian vòng vừa chạy, nhường CPU cho YOLO/pose
 ARCFACE_IDLE_RATIO = 0.5
 
@@ -87,6 +80,9 @@ _recognizer: FaceRecognizer | None = None
 _recognizer_lock = threading.Lock()
 _reports: dict[str, BehaviorRecorder] = {}
 _reports_lock = threading.Lock()
+_upload_index_lock = threading.Lock()
+_sessions: set["_StreamSession"] = set()
+_sessions_lock = threading.Lock()
 
 
 def get_recognizer() -> FaceRecognizer:
@@ -104,14 +100,6 @@ def _read_template(name: str) -> HTMLResponse:
     if not path.exists():
         return HTMLResponse(f"<h1>Không thấy {name}</h1>", status_code=404)
     return HTMLResponse(path.read_text(encoding="utf-8"))
-
-
-def _fit_width(frame: np.ndarray) -> np.ndarray:
-    h, w = frame.shape[:2]
-    if w <= WORK_MAX_WIDTH:
-        return frame
-    s = WORK_MAX_WIDTH / float(w)
-    return cv2.resize(frame, (WORK_MAX_WIDTH, int(h * s)), interpolation=cv2.INTER_AREA)
 
 
 def _render_frame(frame: np.ndarray, detections: list[dict]) -> bytes:
@@ -139,21 +127,25 @@ class _StreamSession:
         self.cfg = _config
         self.session_id = uuid.uuid4().hex[:10]
         self.clock = VideoClock(fps, is_camera)
+        classes = load_student_classes()
+        known_classes = [c for c in classes.values() if c]
         self.recorder = BehaviorRecorder(
             fps, self.clock, source_label, dict(zip(recognizer.ids, recognizer.names)),
             legend_fn=lambda: behavior_legend(_config),
+            student_classes=classes,
+            # students.csv thường chỉ có HS nạp sau → HS còn lại lấy lớp phổ biến nhất
+            default_class=max(set(known_classes), key=known_classes.count) if known_classes else "",
         )
-        self.yolo = YOLO(self.cfg.yolo_model)
-        self.pose = PoseEstimator(self.cfg.pose_model, self.cfg.pose_imgsz, self.cfg.pose_conf)
-        self.eye_detector = None
-        try:
-            from eye_detector import EyeDetector
-
-            self.eye_detector = EyeDetector()
-        except Exception as exc:  # noqa: BLE001
-            print(f"Không bật được EyeDetector (EAR dùng độ tin cậy keypoint): {exc}")
-        self.state_tracker = StudentStateTracker(self.eye_detector)
         self.identity = IdentityTracker(recognizer)
+        self.analyzer = FrameAnalyzer(self.cfg, self.identity)
+        self.kp_log: KeypointLogger | None = None
+        if self.cfg.record_keypoints:
+            stem = f"{datetime.now():%Y%m%d_%H%M%S}_{self.session_id}"
+            w, h = work_size(int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)),
+                             int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)))
+            self.kp_log = KeypointLogger(
+                KEYPOINT_LOG_DIR / f"{stem}.jsonl", source_label, fps, w, h, self.cfg.behavior,
+            )
 
         self.stop = threading.Event()
         self.eof = threading.Event()
@@ -183,8 +175,9 @@ class _StreamSession:
             if t.is_alive():
                 t.join(timeout=10)
         self.cap.release()
-        if self.eye_detector is not None:
-            self.eye_detector.close()
+        self.analyzer.close()
+        if self.kp_log is not None:
+            self.kp_log.close()
 
     def snapshot(self):
         with self._lock:
@@ -226,7 +219,7 @@ class _StreamSession:
                     self.stop.wait(CAMERA_RETRY_SEC)
                     continue
                 fails = 0
-                frame = _fit_width(frame)
+                frame = fit_width(frame)
                 with self._lock:
                     self._frame, self._frame_idx = frame, idx
                 idx += 1
@@ -254,99 +247,24 @@ class _StreamSession:
                 self.stop.wait(0.01)
                 continue
             frames_elapsed = idx - last_idx if last_idx >= 0 else 1
-            fps_eff = max(self.fps / max(1, frames_elapsed), 1.0 / MAX_BEHAVIOR_STEP_SEC)
+            fps_eff = effective_fps(self.fps, frames_elapsed)
             t0 = time.perf_counter()
             try:
-                detections, parsed = self._analyze(frame, fps_eff)
+                detections, parsed = self.analyzer.analyze(frame, fps_eff)
             except Exception as exc:  # noqa: BLE001
                 self.error = f"Lỗi phân tích: {exc}"
                 self.stop.set()
                 return
             last_idx = idx
-            self.recorder.record(idx, detections, time.time())
+            self.recorder.record(idx, detections, time.time(), frame)
+            if self.kp_log is not None:
+                self.kp_log.log(idx, fps_eff, detections)
             with self._lock:
                 self._detections = detections
                 self._analysis_idx = idx
                 self._analysis_ms = round((time.perf_counter() - t0) * 1000)
                 self._analysis_version += 1
                 self._face_job = (idx, frame, parsed)
-
-    def _analyze(self, frame: np.ndarray, fps_eff: float) -> tuple[list[dict], list]:
-        cfg = self.cfg
-        h, w = frame.shape[:2]
-        results = self.yolo.track(
-            source=frame,
-            conf=cfg.confidence_threshold,
-            iou=cfg.iou_threshold,
-            classes=[0],
-            persist=True,
-            verbose=False,
-            imgsz=cfg.yolo_imgsz,
-            tracker="bytetrack.yaml",
-        )
-        raw = []
-        boxes = results[0].boxes
-        if boxes is not None and len(boxes) > 0 and boxes.id is not None:
-            xyxy = boxes.xyxy.cpu().numpy()
-            tids = boxes.id.cpu().numpy().astype(int)
-            raw = [(int(t), *map(int, b)) for b, t in zip(xyxy, tids)]
-
-        parsed = self.identity.update_tracks(raw, w, h)
-        pose_targets = sorted(
-            parsed, key=lambda t: (t[3] - t[1]) * (t[4] - t[2]), reverse=True
-        )[: cfg.pose_max_per_frame]
-        kpts_by_tid = dict(
-            zip(
-                [t[0] for t in pose_targets],
-                self.pose.estimate(frame, [t[1:] for t in pose_targets]),
-            )
-        )
-
-        detections: list[dict] = []
-        for tid, x1, y1, x2, y2 in parsed:
-            info = self.identity.describe(tid)
-            kpts = kpts_by_tid.get(tid)
-            if kpts is None and info["no_face_suspect"]:
-                continue
-            det = {
-                "track_id": tid,
-                "x1": x1, "y1": y1, "x2": x2, "y2": y2,
-                "known": info["known"],
-                "student_id": info["student_id"],
-                "name": info["name"],
-                "match_pct": info["match_pct"],
-                "hard_locked": info["hard_locked"],
-                "keypoints": kpts,
-                "score": None,
-                "reasons": [],
-                "is_focused": None,
-            }
-            if kpts is not None:
-                key = info["student_id"] or f"t{tid}"
-                face_crop = None
-                # Cúi nhìn xuống làm mắt trông như nhắm → không đo EAR (ngủ gục đã có luật cúi đầu lâu)
-                if (cfg.behavior.is_on("Nhắm mắt")
-                        and x2 - x1 >= cfg.eye_min_box_width
-                        and not is_head_down(kpts, y2 - y1, cfg.behavior)):
-                    face_crop = frame[y1:y1 + int((y2 - y1) * HEAD_CROP_FRAC), x1:x2]
-                score, reasons = calculate_attention_score(
-                    kpts, y2 - y1, cfg, self.state_tracker, key, fps_eff,
-                    face_crop=face_crop,
-                )
-                det["score"] = int(score)
-                det["reasons"] = reasons
-                det["is_focused"] = score >= cfg.attention_threshold
-            detections.append(det)
-
-        scored = [d for d in detections if d["score"] is not None]
-        for tid_a, tid_b in detect_chat(scored, cfg):
-            for det in scored:
-                if det["track_id"] in (tid_a, tid_b):
-                    det["score"] = max(0, det["score"] - cfg.behavior.chat_penalty)
-                    if "Nói chuyện" not in det["reasons"]:
-                        det["reasons"].append("Nói chuyện")
-                    det["is_focused"] = det["score"] >= cfg.attention_threshold
-        return detections, parsed
 
     def _face_loop(self) -> None:
         """ArcFace chạy riêng để tên không làm chậm YOLO/pose."""
@@ -452,6 +370,35 @@ async def set_behaviors(request: Request):
     }
 
 
+@app.get("/api/arcface")
+def arcface_thresholds():
+    """Ngưỡng ArcFace đang dùng (%)."""
+    return get_recognizer().thresholds()
+
+
+@app.post("/api/arcface")
+async def set_arcface_thresholds(request: Request):
+    """Đổi ngưỡng: {"match_pct", "hard_lock_pct", "hard_lock_margin_pct"}.
+
+    Áp dụng ngay cho video đang chạy (bỏ tên các track khớp dưới ngưỡng mới) và lưu vào meta.json.
+    """
+    body = await request.json()
+    rec = await asyncio.to_thread(get_recognizer)
+    cur = rec.thresholds()
+    try:
+        values = {k: float(body.get(k, cur[k])) for k in ("match_pct", "hard_lock_pct", "hard_lock_margin_pct")}
+        await asyncio.to_thread(rec.set_thresholds, **values)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(400, str(exc)) from exc
+    with _sessions_lock:
+        sessions = list(_sessions)
+    dropped = sum(
+        s.identity.drop_below(rec.match_threshold, rec.hard_lock_sim)
+        for s in sessions if s.identity.rec is rec
+    )
+    return {**rec.thresholds(), "dropped": dropped}
+
+
 @app.get("/api/cameras")
 def cameras():
     """Camera trên máy (DirectShow): index dùng cho ô nguồn video; ưu tiên OBS Virtual Camera."""
@@ -470,12 +417,14 @@ async def upload_video(file: UploadFile = File(...)):
     UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
     dest = UPLOAD_DIR / f"{uuid.uuid4().hex[:12]}{ext}"
     size = 0
+    digest = hashlib.sha256()
     try:
         with open(dest, "wb") as out:
             while chunk := await file.read(UPLOAD_CHUNK):
                 size += len(chunk)
                 if size > MAX_UPLOAD_BYTES:
                     raise HTTPException(413, "File quá lớn (tối đa 2 GB)")
+                digest.update(chunk)
                 out.write(chunk)
     except BaseException:
         dest.unlink(missing_ok=True)
@@ -483,18 +432,64 @@ async def upload_video(file: UploadFile = File(...)):
     finally:
         await file.close()
 
+    existing = await asyncio.to_thread(_find_uploaded, size, digest.hexdigest(), dest)
+    if existing is not None:
+        dest.unlink(missing_ok=True)
+        dest = existing
+
     cap = cv2.VideoCapture(str(dest))
     readable = cap.isOpened() and cap.read()[0]
     frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     fps = cap.get(cv2.CAP_PROP_FPS) or 0.0
     cap.release()
     if not readable:
-        dest.unlink(missing_ok=True)
+        if existing is None:
+            dest.unlink(missing_ok=True)
         raise HTTPException(400, "File không phải video đọc được")
 
-    return JSONResponse(
-        {"path": str(dest), "filename": file.filename, "size": size, "frames": frames, "fps": fps}
-    )
+    return JSONResponse({
+        "path": str(dest), "filename": file.filename, "size": size, "frames": frames, "fps": fps,
+        "duplicate": existing is not None,
+    })
+
+
+def _file_sha256(path: Path) -> str:
+    h = hashlib.sha256()
+    with path.open("rb") as f:
+        while chunk := f.read(UPLOAD_CHUNK):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _find_uploaded(size: int, sha256: str, new_file: Path) -> Path | None:
+    """Video đã tải lên trước đó có cùng nội dung (→ dùng lại), không thì ghi nhận file mới.
+
+    Mã băm file cũ được nhớ trong UPLOAD_INDEX (theo tên + kích thước + mtime) để không băm lại.
+    """
+    with _upload_index_lock:
+        try:
+            index = json.loads(UPLOAD_INDEX.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            index = {}
+        index = {name: e for name, e in index.items() if (UPLOAD_DIR / name).is_file()}
+        found = None
+        for p in sorted(UPLOAD_DIR.iterdir()):
+            if p == new_file or not p.is_file() or p.suffix.lower() not in ALLOWED_VIDEO_EXTS:
+                continue
+            st = p.stat()
+            if st.st_size != size:
+                continue
+            entry = index.get(p.name)
+            if not entry or entry.get("size") != st.st_size or entry.get("mtime") != st.st_mtime:
+                entry = index[p.name] = {"size": st.st_size, "mtime": st.st_mtime, "sha256": _file_sha256(p)}
+            if entry["sha256"] == sha256:
+                found = p
+                break
+        if found is None:
+            st = new_file.stat()
+            index[new_file.name] = {"size": st.st_size, "mtime": st.st_mtime, "sha256": sha256}
+        UPLOAD_INDEX.write_text(json.dumps(index, indent=1), encoding="utf-8")
+        return found
 
 
 @app.websocket("/ws")
@@ -564,10 +559,22 @@ async def websocket_endpoint(ws: WebSocket):
             "report_url": f"/api/report/{session.session_id}",
         })
         session.start()
+        with _sessions_lock:
+            _sessions.add(session)
 
         send_interval = 1.0 / min(fps, DISPLAY_MAX_FPS)
         sent_idx = -1
         sent_version = 0
+        next_summary = 0.0
+
+        async def send_summary() -> None:
+            summary = await asyncio.to_thread(session.recorder.summary)
+            await ws.send_json({
+                "type": "summary",
+                "attention_threshold": _config.attention_threshold,
+                **summary,
+            })
+
         # Lịch tuyệt đối: Windows làm tròn sleep lên ~15.6 ms, sleep cố định sẽ tụt fps
         next_send = time.monotonic()
         while True:
@@ -602,11 +609,16 @@ async def websocket_endpoint(ws: WebSocket):
                     ],
                 })
 
+            if time.monotonic() >= next_summary:
+                next_summary = time.monotonic() + SUMMARY_INTERVAL_SEC
+                await send_summary()
+
             if frame is not None and frame_idx != sent_idx:
                 jpeg = await asyncio.to_thread(_render_frame, frame, detections)
                 await ws.send_bytes(jpeg)
                 sent_idx = frame_idx
             elif session.eof.is_set():
+                await send_summary()
                 path = await asyncio.to_thread(_save_report, session.session_id)
                 await ws.send_json({
                     "status": "ended",
@@ -627,6 +639,8 @@ async def websocket_endpoint(ws: WebSocket):
             pass
     finally:
         if session is not None:
+            with _sessions_lock:
+                _sessions.discard(session)
             await asyncio.to_thread(session.close)
             try:
                 path = await asyncio.to_thread(_save_report, session.session_id)
