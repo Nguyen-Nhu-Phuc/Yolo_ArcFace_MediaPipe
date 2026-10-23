@@ -14,7 +14,22 @@ Video tải lên / webcam / camera RTSP
 ```
 
 YOLOv12 không có trọng số pose chính thức, nên phần keypoint dùng YOLO11-pose
-(`yolo11n-pose.pt`, tự tải lần đầu).
+(`models/yolo11n-pose.pt`).
+
+## Cấu trúc thư mục
+
+```
+app.py              máy chủ web — python app.py
+core/               mã chạy chính: cấu hình, phân tích khung, nhận diện, luật hành vi, báo cáo
+tools/              script chạy riêng: dựng gallery, đánh giá, trích keypoint, so sánh mô hình, OBS, quay demo
+data/               dataset khuôn mặt, nhãn hành vi (labels/), behavior_settings.json
+models/             trọng số: yolo12_classroom/ (YOLOv12 lớp học), yolo11n-pose.pt, mediapipe/, arcface_*/
+templates/, static/ giao diện web (static/uploads/ là video tạm khi tải lên)
+docs/               báo cáo tiến độ, mẫu luận văn
+logs/, reports/     đầu ra khi chạy (log keypoint, báo cáo Excel, kết quả đánh giá)
+```
+
+Script trong `tools/` chạy từ thư mục gốc dự án, ví dụ `python tools/eval_behavior.py ...`.
 
 ## Chạy
 
@@ -23,11 +38,16 @@ pip install -r requirements.txt
 python app.py
 ```
 
+Trên máy khác (nhận dự án bằng tệp zip, cần Python 3.12): nhấp đúp `cai_dat.bat` một lần, sau đó `chay.bat` mỗi lần dùng.
+Hướng dẫn đầy đủ: `docs/Huong_dan_cai_dat.docx`.
+
 Mở http://127.0.0.1:5000, rồi:
 - bấm **Tải video lên** (tự phân tích ngay), hoặc
 - nhập `0` (webcam), `rtsp://...` (camera IP) hay đường dẫn file rồi bấm **Kết nối**.
 
-Video tải lên được lưu trong `static/uploads/` (không commit).
+Video tải lên chỉ được lưu tạm trong `static/uploads/` trong lúc phân tích và bị xóa khi phiên kết thúc
+(video phát hết, bấm Dừng hoặc đóng trang); bản tạm sót lại được dọn khi khởi động server.
+Muốn không chép video lên máy chủ thì dán đường dẫn file vào ô nguồn rồi bấm **Kết nối**.
 
 ## Dashboard giáo viên
 
@@ -51,7 +71,7 @@ Số liệu này cùng nguồn với báo cáo Excel bên dưới.
 3. Bấm **Kết nối**. Có thể gõ thẳng tên vào ô nguồn (`OBS Virtual Camera` hoặc `obs`).
 
 Lấy hình từ EZVIZ Studio qua OBS tự động: bật OBS WebSocket (Tools → WebSocket Server Settings),
-mở EZVIZ Studio ở Live View rồi chạy nền `python obs_ezviz.py`. Script tạo nguồn Window Capture,
+mở EZVIZ Studio ở Live View rồi chạy nền `python tools/obs_ezviz.py`. Script tạo nguồn Window Capture,
 cắt đúng vùng video, đặt OBS 1280x720 @ 15fps, bật Virtual Camera và tự căn lại khi cửa sổ EZVIZ
 đổi kích thước. Cửa sổ EZVIZ phải mở (phóng to cho nét), không thu nhỏ xuống taskbar.
 
@@ -81,7 +101,7 @@ báo cáo cũng tự lưu vào `reports/bao_cao_hanh_vi_<ngày giờ>_<phiên>.x
   điều kiện nhận biết, điểm trừ, ý nghĩa màu khung
 
 Bật/tắt từng hành vi: tab **Hành vi** ở thanh bên (công tắc từng dòng, nút Bật tất cả / Tắt tất cả).
-Áp dụng ngay cho video đang chạy, lưu vào `behavior_settings.json` cho lần chạy sau
+Áp dụng ngay cho video đang chạy, lưu vào `data/behavior_settings.json` cho lần chạy sau
 (mặc định tắt "Nói chuyện"). Hành vi tắt thì không trừ điểm, không gắn nhãn, không ghi vào Excel.
 
 Ngưỡng ArcFace: tab **Nhận diện** ở thanh bên có ba thanh trượt — ngưỡng nhận diện (% giống tối thiểu để gắn tên),
@@ -120,28 +140,28 @@ thử hàng trăm bộ ngưỡng trong vài giây mà không phải chạy lại
 1. Tạo log cho video cần gán nhãn (không cần mở web). ArcFace chạy mỗi bước nên chậm, khoảng 5 s/bước trên CPU:
 
    ```bash
-   python extract_keypoints.py --video static/uploads/x.mp4 --start 0 --duration 600 --step 0.5
+   python tools/extract_keypoints.py --video D:\video\tiet3.mp4 --start 0 --duration 600 --step 0.5
    ```
 
-2. Gán nhãn vào `labels/<tên log>.csv` theo mẫu `labels/mau_nhan.csv`, gồm các cột `student_id,behavior,start,end,note`.
+2. Gán nhãn vào `data/labels/<tên log>.csv` theo mẫu `data/labels/mau_nhan.csv`, gồm các cột `student_id,behavior,start,end,note`.
    Thời gian là vị trí trong video (giây hoặc `mm:ss` / `hh:mm:ss`); mã HS là `HSxxx`, track chưa nhận diện thì ghi `ID<track>`.
    Cần gán **đủ mọi hành vi của mọi học sinh** trong đoạn đã chọn, vì đợt dự đoán không khớp nhãn nào sẽ bị tính là báo nhầm.
    Để có bản nháp, chạy `--dump`, sau đó sửa và xóa những dòng sai:
 
    ```bash
-   python eval_behavior.py --log logs/keypoints/x.jsonl --dump labels/x.csv
+   python tools/eval_behavior.py --log logs/keypoints/x.jsonl --dump data/labels/x.csv
    ```
 
 3. Đo, rồi dò ngưỡng (ưu tiên precision qua F0.5, đặc biệt với Ngủ gục / Cúi đầu lâu):
 
    ```bash
-   python eval_behavior.py --log logs/keypoints/x.jsonl --labels labels/x.csv
-   python eval_behavior.py --log logs/keypoints/x.jsonl --labels labels/x.csv \
+   python tools/eval_behavior.py --log logs/keypoints/x.jsonl --labels data/labels/x.csv
+   python tools/eval_behavior.py --log logs/keypoints/x.jsonl --labels data/labels/x.csv \
        --grid head_down_drop=0.3,0.4,0.5 --grid head_down_duration=3,4,5 --behaviors "Cúi đầu lâu"
    ```
 
    Một đợt dự đoán được tính là khớp nhãn khi cùng HS, cùng hành vi và phần chồng lên nhau ≥ 30% đợt ngắn hơn.
-   Bộ tham số tốt nhất thì ghi vào `BehaviorConfig` trong `config.py`.
+   Bộ tham số tốt nhất thì ghi vào `BehaviorConfig` trong `core/config.py`.
 
 ## Màu box
 
@@ -157,33 +177,33 @@ Nhãn: `HS012 85 · Cúi đầu lâu` = mã học sinh, điểm, hành vi chính
 |---|---|---|
 | `YOLO_WEIGHTS` | `classroom` = YOLOv12n train cho lớp; `coco` = `yolo12n.pt` | `classroom` |
 | `YOLO_MODEL_PATH` | Đường dẫn `.pt` YOLO bất kỳ (ghi đè) | — |
-| `POSE_MODEL` | Model pose | `yolo11n-pose.pt` |
-| `CLASSROOM_FACES_DIR` / `ARCFACE_MODEL_DIR` | Dataset / gallery ArcFace | `2_dataset_arcface` |
+| `POSE_MODEL` | Model pose | `models/yolo11n-pose.pt` |
+| `CLASSROOM_FACES_DIR` / `ARCFACE_MODEL_DIR` | Dataset / gallery ArcFace | `data/2_dataset_arcface` |
 
-Ngưỡng hành vi và điểm nằm trong `config.py` (`BehaviorConfig`, `attention_threshold`).
+Ngưỡng hành vi và điểm nằm trong `core/config.py` (`BehaviorConfig`, `attention_threshold`).
 
 ## Dữ liệu
 
 - Gallery mặc định: `models/arcface_2_dataset_arcface/gallery.npz`
-- Bản cũ: `classroom-faces-lop07/` + `models/arcface_classroom-faces-lop07/`
-- Weights YOLOv12 lớp học: `runs/detect/train/weights/best.pt`
+- Bản cũ: `data/classroom-faces-lop07/` + `models/arcface_classroom-faces-lop07/`
+- Weights YOLOv12 lớp học: `models/yolo12_classroom/best.pt` (kèm `results.csv`, `args.yaml` của lần huấn luyện)
 
 Rebuild gallery:
 
 ```bash
-python export_arcface_model.py --dataset 2_dataset_arcface
+python tools/export_arcface_model.py --dataset 2_dataset_arcface
 ```
 
 Đánh giá nhận diện (gallery dựng từ ảnh `enroll`, kiểm tra trên ảnh `test`, kết quả ở `reports/arcface_eval_<dataset>.json`):
 
 ```bash
-python eval_arcface.py --dataset classroom-faces-lop07
+python tools/eval_arcface.py --dataset classroom-faces-lop07
 ```
 
 Đổi về gallery cũ:
 
 ```bash
-set CLASSROOM_FACES_DIR=classroom-faces-lop07
+set CLASSROOM_FACES_DIR=data\classroom-faces-lop07
 set ARCFACE_MODEL_DIR=models\arcface_classroom-faces-lop07
 python app.py
 ```

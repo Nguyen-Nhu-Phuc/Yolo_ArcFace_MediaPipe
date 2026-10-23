@@ -111,9 +111,6 @@ svg { flex-shrink: 0; }
 .meta-card { flex-shrink: 0; padding: 8px 12px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px 8px; }
 .meta-item .label { font-size: 11px; color: var(--faint); }
 .meta-item .value { font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; }
-.clock-row { grid-column: 1 / -1; display: flex; align-items: baseline; gap: 8px; margin-top: 4px; padding-top: 7px; border-top: 1px solid var(--border); font-size: 12px; color: var(--muted); }
-.clock-row b { color: #fde68a; font-size: 14px; font-family: Consolas, monospace; }
-.clock-row #timeSource { color: var(--faint); font-size: 11px; }
 .panel-card { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .tabs { display: flex; gap: 2px; margin: 10px 10px 8px; padding: 3px; background: var(--bg); border-radius: 9px; flex-shrink: 0; }
 .tab-btn { flex: 1; height: 30px; border: 0; border-radius: 7px; background: transparent; color: var(--muted); font-size: 12px; font-weight: 600; cursor: pointer; transition: background .15s, color .15s; }
@@ -264,7 +261,6 @@ svg { flex-shrink: 0; }
       <span>Tập trung: <b id="hFocused">-</b></span>
       <span>Điểm TB: <b id="hAvg">-</b></span>
       <span>Đã gán tên: <b id="hNamed">-</b></span>
-      <span><b id="hTime"></b></span>
     </div>
     <div class="legend-overlay" id="legendOverlay">
       <div class="ov-title">Chú thích nhãn trên video: <b>HS012 85 · Cúi đầu lâu</b> = mã HS · điểm · hành vi chính</div>
@@ -288,7 +284,6 @@ svg { flex-shrink: 0; }
       <div class="meta-item"><div class="label">Đã gán tên (khóa)</div><div class="value" id="namedCount">-</div></div>
       <div class="meta-item"><div class="label">Phân tích (ms)</div><div class="value" id="analysisMs">-</div></div>
       <div class="meta-item"><div class="label">Khung</div><div class="value" id="frameIdx">-</div></div>
-      <div class="clock-row">Giờ trên video <b id="videoTime">—</b> <span id="timeSource"></span></div>
     </div>
 
     <div class="card panel-card">
@@ -394,13 +389,10 @@ let fitMode = localStorage.getItem('fitMode') === 'cover' ? 'cover' : 'contain';
 // Thay bằng /api/legend khi tải xong (giữ đồng bộ với ngưỡng phía server)
 let LEGEND = [
   { name: 'Cúi đầu lâu', short: 'Cúi lâu', positive: false },
-  { name: 'Nhắm mắt', short: 'Ngủ', positive: false },
+  { name: 'Ngủ gục', short: 'Ngủ gục', positive: false },
   { name: 'Thẫn thờ', short: 'Thẫn', positive: false },
   { name: 'Quay đầu', short: 'Quay', positive: false },
-  { name: 'Cúi đầu thoáng qua', short: 'Cúi', positive: false },
   { name: 'Nghiêng người', short: 'Nghiêng', positive: false },
-  { name: 'Tay bất thường', short: 'Tay', positive: false },
-  { name: 'Nói chuyện', short: 'Nói', positive: false },
   { name: 'Viết bài', short: 'Viết', positive: true },
   { name: 'Giơ tay', short: 'Giơ tay', positive: true },
 ];
@@ -651,11 +643,6 @@ function renderStats(data) {
   setText('hFocused', focused);
   setText('hAvg', avg);
   setText('hNamed', data.identified ?? '-');
-  const TIME_SOURCE = { osd: '(đọc từ video)', system: '(đồng hồ máy)', video: '(chưa đọc được giờ trên video)' };
-  setText('videoTime', data.video_time || '—');
-  setText('timeSource', TIME_SOURCE[data.time_source] || '');
-  setText('hTime', data.video_time || '');
-
   const el = document.getElementById('studentList');
   if (!list.length) {
     el.innerHTML = '<span class="empty">Chưa phát hiện học sinh</span>';
@@ -775,9 +762,8 @@ function uploadVideo(file) {
       log('Tải lên thất bại: ' + (data.detail || xhr.status));
       return;
     }
-    log((data.duplicate ? 'Video ' + data.filename + ' đã có sẵn trên máy chủ — dùng lại, không lưu thêm bản mới'
-                        : 'Đã tải lên ' + data.filename) +
-      ' (' + data.frames + ' khung, ' + Number(data.fps).toFixed(1) + ' fps)');
+    log('Đã tải lên ' + data.filename + ' (' + data.frames + ' khung, ' + Number(data.fps).toFixed(1) +
+      ' fps) — bản tạm, tự xóa khi dừng phân tích');
     document.getElementById('videoSource').value = data.path;
     connect();
   };

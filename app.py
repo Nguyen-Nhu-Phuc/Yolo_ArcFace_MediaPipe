@@ -10,9 +10,9 @@ Chạy: python app.py   →   http://127.0.0.1:5000
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import json
 import os
+import re
 import threading
 import time
 import uuid
@@ -29,16 +29,16 @@ from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile, Web
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from ultralytics import YOLO
 
-from analysis import FrameAnalyzer, effective_fps, fit_width, work_size
-from behavior import REASON_SHORT, behavior_legend
-from behavior_log import BehaviorRecorder
-from behavior_monitor import get_monitor, reset_monitor
-from config import Config, load_config, save_behavior_settings
-from face_gallery import FaceRecognizer, load_student_classes
-from identity import IdentityTracker
-from keypoint_log import LOG_DIR as KEYPOINT_LOG_DIR
-from keypoint_log import KeypointLogger
-from video_source import (
+from core.analysis import FrameAnalyzer, effective_fps, fit_width, work_size
+from core.behavior import REASON_SHORT, behavior_legend
+from core.behavior_log import BehaviorRecorder
+from core.behavior_monitor import get_monitor, reset_monitor
+from core.config import HIDDEN_BEHAVIORS, Config, load_config, save_behavior_settings
+from core.face_gallery import FaceRecognizer, load_student_classes
+from core.identity import IdentityTracker
+from core.keypoint_log import LOG_DIR as KEYPOINT_LOG_DIR
+from core.keypoint_log import KeypointLogger
+from core.video_source import (
     capture_fps,
     create_camera_capture,
     is_stream_url,
@@ -47,13 +47,14 @@ from video_source import (
     parse_camera_source,
     resolve_camera_name,
 )
-from video_clock import RESYNC_SEC, VideoClock, preload_ocr, read_osd
-from visualizer import draw_annotations
+from core.video_clock import RESYNC_SEC, VideoClock, preload_ocr, read_osd
+from core.visualizer import draw_annotations
 
 BASE_DIR = Path(__file__).resolve().parent
 TEMPLATES_DIR = BASE_DIR / "templates"
 UPLOAD_DIR = BASE_DIR / "static" / "uploads"
-UPLOAD_INDEX = UPLOAD_DIR / ".hashes.json"
+# Video tải lên mà không có phiên nào mở trong khoảng này thì bị dọn
+UPLOAD_ORPHAN_SEC = 3600
 REPORTS_DIR = BASE_DIR / "reports"
 MAX_KEPT_REPORTS = 10
 # Đọc toàn khung tìm ngày giờ tốn ~5s CPU → thử tối đa N lần rồi bỏ
@@ -80,7 +81,8 @@ _recognizer: FaceRecognizer | None = None
 _recognizer_lock = threading.Lock()
 _reports: dict[str, BehaviorRecorder] = {}
 _reports_lock = threading.Lock()
-_upload_index_lock = threading.Lock()
+_uploads_in_use: list[Path] = []  # video tạm đang được phiên phân tích đọc (có thể lặp nếu mở 2 tab)
+_uploads_lock = threading.Lock()
 _sessions: set["_StreamSession"] = set()
 _sessions_lock = threading.Lock()
 
@@ -354,7 +356,7 @@ async def set_behaviors(request: Request):
     Áp dụng ngay cho video đang chạy và lưu vào behavior_settings.json.
     """
     body = await request.json()
-    names = [name for name, _short in REASON_SHORT]
+    names = [name for name, _short in REASON_SHORT if name not in HIDDEN_BEHAVIORS]
     disabled = set(_config.behavior.disabled)
     if isinstance(body.get("all"), bool):
         disabled = set() if body["all"] else set(names)
@@ -362,7 +364,7 @@ async def set_behaviors(request: Request):
         if name not in names:
             raise HTTPException(400, f"Không có hành vi: {name}")
         (disabled.discard if on else disabled.add)(name)
-    _config.behavior.disabled = frozenset(disabled)
+    _config.behavior.disabled = frozenset(disabled) | HIDDEN_BEHAVIORS
     save_behavior_settings(_config)
     return {
         "attention_threshold": _config.attention_threshold,
@@ -409,22 +411,22 @@ def cameras():
 
 @app.post("/api/upload")
 async def upload_video(file: UploadFile = File(...)):
-    """Lưu video vào static/uploads/ và trả đường dẫn để mở qua /ws."""
+    """Lưu tạm video vào static/uploads/ để mở qua /ws — file bị xóa khi phiên phân tích kết thúc."""
     ext = Path(file.filename or "").suffix.lower()
     if ext not in ALLOWED_VIDEO_EXTS:
         raise HTTPException(400, f"Định dạng không hỗ trợ: {ext or '(không có)'}")
 
     UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-    dest = UPLOAD_DIR / f"{uuid.uuid4().hex[:12]}{ext}"
+    await asyncio.to_thread(_purge_uploads, UPLOAD_ORPHAN_SEC)
+    stem = re.sub(r"[^\w.-]+", "_", Path(file.filename or "video").stem)[:60] or "video"
+    dest = UPLOAD_DIR / f"{uuid.uuid4().hex[:12]}_{stem}{ext}"
     size = 0
-    digest = hashlib.sha256()
     try:
         with open(dest, "wb") as out:
             while chunk := await file.read(UPLOAD_CHUNK):
                 size += len(chunk)
                 if size > MAX_UPLOAD_BYTES:
                     raise HTTPException(413, "File quá lớn (tối đa 2 GB)")
-                digest.update(chunk)
                 out.write(chunk)
     except BaseException:
         dest.unlink(missing_ok=True)
@@ -432,64 +434,46 @@ async def upload_video(file: UploadFile = File(...)):
     finally:
         await file.close()
 
-    existing = await asyncio.to_thread(_find_uploaded, size, digest.hexdigest(), dest)
-    if existing is not None:
-        dest.unlink(missing_ok=True)
-        dest = existing
-
     cap = cv2.VideoCapture(str(dest))
     readable = cap.isOpened() and cap.read()[0]
     frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     fps = cap.get(cv2.CAP_PROP_FPS) or 0.0
     cap.release()
     if not readable:
-        if existing is None:
-            dest.unlink(missing_ok=True)
+        dest.unlink(missing_ok=True)
         raise HTTPException(400, "File không phải video đọc được")
 
-    return JSONResponse({
-        "path": str(dest), "filename": file.filename, "size": size, "frames": frames, "fps": fps,
-        "duplicate": existing is not None,
-    })
+    return JSONResponse(
+        {"path": str(dest), "filename": file.filename, "size": size, "frames": frames, "fps": fps}
+    )
 
 
-def _file_sha256(path: Path) -> str:
-    h = hashlib.sha256()
-    with path.open("rb") as f:
-        while chunk := f.read(UPLOAD_CHUNK):
-            h.update(chunk)
-    return h.hexdigest()
+def _is_upload(path) -> bool:
+    try:
+        return Path(path).resolve().parent == UPLOAD_DIR.resolve()
+    except (OSError, TypeError):
+        return False
 
 
-def _find_uploaded(size: int, sha256: str, new_file: Path) -> Path | None:
-    """Video đã tải lên trước đó có cùng nội dung (→ dùng lại), không thì ghi nhận file mới.
+def _upload_label(path) -> str:
+    """'a1b2c3d4e5f6_Tiet3.mp4' → 'Tiet3.mp4' (tên file gốc lúc tải lên)."""
+    name = Path(path).name
+    return name[13:] if _is_upload(path) and len(name) > 13 and name[12] == "_" else name
 
-    Mã băm file cũ được nhớ trong UPLOAD_INDEX (theo tên + kích thước + mtime) để không băm lại.
-    """
-    with _upload_index_lock:
+
+def _purge_uploads(min_age_sec: float = 0.0) -> None:
+    """Xóa video tạm không còn phiên nào dùng (tải lên rồi không kết nối, hoặc sót lại khi server tắt)."""
+    if not UPLOAD_DIR.is_dir():
+        return
+    now = time.time()
+    with _uploads_lock:
+        in_use = set(_uploads_in_use)
+    for p in UPLOAD_DIR.iterdir():
         try:
-            index = json.loads(UPLOAD_INDEX.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            index = {}
-        index = {name: e for name, e in index.items() if (UPLOAD_DIR / name).is_file()}
-        found = None
-        for p in sorted(UPLOAD_DIR.iterdir()):
-            if p == new_file or not p.is_file() or p.suffix.lower() not in ALLOWED_VIDEO_EXTS:
-                continue
-            st = p.stat()
-            if st.st_size != size:
-                continue
-            entry = index.get(p.name)
-            if not entry or entry.get("size") != st.st_size or entry.get("mtime") != st.st_mtime:
-                entry = index[p.name] = {"size": st.st_size, "mtime": st.st_mtime, "sha256": _file_sha256(p)}
-            if entry["sha256"] == sha256:
-                found = p
-                break
-        if found is None:
-            st = new_file.stat()
-            index[new_file.name] = {"size": st.st_size, "mtime": st.st_mtime, "sha256": sha256}
-        UPLOAD_INDEX.write_text(json.dumps(index, indent=1), encoding="utf-8")
-        return found
+            if p.is_file() and p.resolve() not in in_use and now - p.stat().st_mtime >= min_age_sec:
+                p.unlink()
+        except OSError:
+            pass
 
 
 @app.websocket("/ws")
@@ -497,6 +481,7 @@ async def websocket_endpoint(ws: WebSocket):
     await ws.accept()
     cap = None
     session: _StreamSession | None = None
+    upload: Path | None = None
     try:
         data = await ws.receive_json()
         source = parse_camera_source(data.get("video_source", "0"))
@@ -526,6 +511,10 @@ async def websocket_endpoint(ws: WebSocket):
             if not os.path.exists(source):
                 await ws.send_json({"error": f"Không tìm thấy video: {source}"})
                 return
+            if _is_upload(source):
+                upload = Path(source).resolve()
+                with _uploads_lock:
+                    _uploads_in_use.append(upload)
             cap = cv2.VideoCapture(source)
             fps = capture_fps(cap, default=30.0)
             total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
@@ -540,7 +529,7 @@ async def websocket_endpoint(ws: WebSocket):
             "total_frames": total_frames,
         })
         recognizer = await asyncio.to_thread(get_recognizer)
-        source_label = mask_url(source) if is_camera else Path(source).name
+        source_label = mask_url(source) if is_camera else _upload_label(source)
         reopen = (lambda src=source: create_camera_capture(src)[0]) if is_camera else None
         session = await asyncio.to_thread(
             _StreamSession, cap, fps, is_camera, recognizer, source_label, reopen
@@ -591,8 +580,6 @@ async def websocket_endpoint(ws: WebSocket):
                     "analysis_ms": analysis_ms,
                     "identified": session.identity.identified_count(),
                     "hard_locked": session.identity.hard_locked_count(),
-                    "video_time": session.clock.current_label(analysis_idx),
-                    "time_source": session.clock.source,
                     "students": [
                         {
                             "id": d["track_id"],
@@ -649,6 +636,15 @@ async def websocket_endpoint(ws: WebSocket):
                 print(f"Không lưu được báo cáo hành vi: {exc}")
         elif cap is not None:
             cap.release()
+        if upload is not None:
+            with _uploads_lock:
+                _uploads_in_use.remove(upload)
+                still_used = upload in _uploads_in_use
+            if not still_used:
+                try:
+                    upload.unlink(missing_ok=True)
+                except OSError:
+                    pass  # còn bị giữ → _purge_uploads dọn ở lần tải lên / khởi động sau
 
 
 def _register_report(session_id: str, recorder: BehaviorRecorder) -> None:
@@ -846,6 +842,7 @@ def main() -> None:
     args = parser.parse_args()
 
     torch.set_num_threads(max(1, (os.cpu_count() or 4) // 3))
+    _purge_uploads()  # video tạm sót lại từ lần chạy trước
     # ultralytics và easyocr import torchvision lười ở 2 luồng khác nhau → lỗi circular import
     import torchvision  # noqa: F401
 

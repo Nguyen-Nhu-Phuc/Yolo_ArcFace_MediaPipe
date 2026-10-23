@@ -4,6 +4,7 @@ reports/
 demo/
 behavior_settings.json
 /yolo*.pt
+/models/yolo*.pt
 logs/
 __pycache__/
 *.pyc
