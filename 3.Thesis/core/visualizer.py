@@ -25,13 +25,15 @@ _FONT_CANDIDATES = (
 )
 
 COLOR_CLEAR = (184, 163, 148)       # không gắn cảnh báo
-COLOR_ACTIVITY = (248, 189, 56)     # giơ tay, viết bài, quay đầu
+COLOR_ACTIVITY = (248, 189, 56)     # giơ tay, viết bài (B1/B2)
+COLOR_NEUTRAL = (146, 184, 130)     # quay đầu (B3) — ERNU → N
 COLOR_REVIEW = (60, 60, 235)        # cúi đầu lâu, gục xuống bàn
 COLOR_POSTURE = (11, 158, 245)      # nghiêng người — chỉ ghi tư thế
 COLOR_UNKNOWN = (200, 160, 70)      # thiếu điểm khớp / chưa có tư thế
 _GROUP_COLOR = {
     "clear": COLOR_CLEAR,
     "activity": COLOR_ACTIVITY,
+    "neutral": COLOR_NEUTRAL,
     "review": COLOR_REVIEW,
     "posture": COLOR_POSTURE,
     "unknown": COLOR_UNKNOWN,

@@ -10,7 +10,13 @@ import cv2
 import numpy as np
 from ultralytics import YOLO
 
-from core.behavior import StudentStateTracker, detect_behaviors, is_head_down, observation_group
+from core.behavior import (
+    UNKNOWN_BEHAVIOR,
+    StudentStateTracker,
+    detect_behaviors,
+    is_head_down,
+    observation_group,
+)
 from core.chat_detector import ChatTracker
 from core.config import Config
 from core.identity import IdentityTracker
@@ -18,6 +24,10 @@ from core.pose_estimator import PoseEstimator
 
 HEAD_CROP_FRAC = 0.42  # phần trên box người dùng làm crop mặt cho EAR / MAR
 WORK_MAX_WIDTH = 1280  # khung được thu về độ rộng này trước khi phân tích + hiển thị
+# Ba loại thời gian (không trộn):
+#   1) Thời gian video — chỉ số khung / FPS nguồn → mốc bắt đầu/kết thúc sự kiện trên Excel
+#   2) Thời gian quan sát hợp lệ — dt = 1/fps_eff đưa vào bộ đếm hành vi (bằng chứng duy trì)
+#   3) Thời gian xử lý — ms phân tích / khung (hiệu năng), không dùng cho điểm danh hay hành vi
 # Phân tích chậm (CPU) → mỗi lần chỉ cộng tối đa N giây vào bộ đếm hành vi,
 # để 1 lần quan sát không đủ vượt ngưỡng thời gian (vd. nhắm mắt 2s)
 MAX_BEHAVIOR_STEP_SEC = 1.0
@@ -39,6 +49,11 @@ def work_size(width: int, height: int) -> tuple[int, int]:
 
 
 def effective_fps(fps: float, frames_elapsed: int) -> float:
+    """FPS hiệu dụng cho thời gian quan sát hợp lệ (bộ đếm hành vi).
+
+    Khi bỏ khung, fps/frames_elapsed giảm; sàn 1/MAX_BEHAVIOR_STEP_SEC tránh cộng dt quá lớn
+    (hành vi 10s video có thể ghi nhận < 10s quan sát hợp lệ — đúng theo thiết kế thận trọng).
+    """
     return max(fps / max(1, frames_elapsed), 1.0 / MAX_BEHAVIOR_STEP_SEC)
 
 
@@ -115,6 +130,7 @@ class FrameAnalyzer:
         pose_targets = sorted(
             parsed, key=lambda t: (t[3] - t[1]) * (t[4] - t[2]), reverse=True
         )[: cfg.pose_max_per_frame]
+        pose_tid_set = {t[0] for t in pose_targets}
         kpts_by_tid = dict(
             zip(
                 [t[0] for t in pose_targets],
@@ -123,11 +139,14 @@ class FrameAnalyzer:
         )
 
         detections: list[dict] = []
+        dt = 1.0 / max(float(fps_eff), 1e-6)
         for tid, x1, y1, x2, y2 in parsed:
             info = self.identity.describe(tid)
             kpts = kpts_by_tid.get(tid)
-            if kpts is None and info["no_face_suspect"]:
+            # Nghi ngờ không phải người (OSD…) và không được đưa vào pose → bỏ qua hiển thị
+            if kpts is None and info["no_face_suspect"] and tid not in pose_tid_set:
                 continue
+            key = info["student_id"] or f"t{tid}"
             det = {
                 "track_id": tid,
                 "x1": x1, "y1": y1, "x2": x2, "y2": y2,
@@ -136,23 +155,44 @@ class FrameAnalyzer:
                 "name": info["name"],
                 "match_pct": info["match_pct"],
                 "hard_locked": info["hard_locked"],
+                "face_match_events": info.get("face_match_events", 0),
                 "keypoints": kpts,
+                "key": key,
                 "posed": False,
+                "pose_status": "ok",
                 "reasons": [],
                 "group": "unknown",
             }
             if kpts is not None:
-                key = info["student_id"] or f"t{tid}"
                 signals = self._face_signals(frame, tid, (x1, y1, x2, y2), kpts)
                 reasons = detect_behaviors(
                     kpts, cfg, self.state_tracker, key, fps_eff, signals=signals,
                 )
                 det.update(
-                    key=key, signals=signals, yaw=self.state_tracker.last_turn.get(key),
+                    signals=signals, yaw=self.state_tracker.last_turn.get(key),
                     mar=signals["mar"],
                     posed=True, reasons=reasons,
                     group=observation_group(reasons),
+                    pose_status="ok",
                 )
+            else:
+                # Thiếu keypoint: không coi là bình thường; decay bộ đếm, ghi Không xác định
+                # khi đã gửi sang YOLO-Pose nhưng không có điểm khớp.
+                self.state_tracker.decay(key, dt, cfg.behavior)
+                if tid in pose_tid_set:
+                    det.update(
+                        posed=True,  # vẫn ghi nhật ký / Excel như một quan sát
+                        reasons=[UNKNOWN_BEHAVIOR],
+                        group="unknown",
+                        pose_status="no_keypoints",
+                    )
+                else:
+                    det.update(
+                        posed=False,
+                        reasons=[],
+                        group="unknown",
+                        pose_status="skipped_limit",
+                    )
             detections.append(det)
 
         apply_chat(self.chat, [d for d in detections if d.get("posed")], cfg, fps_eff)

@@ -362,13 +362,21 @@ svg { flex-shrink: 0; }
           <div class="mini absent"><div class="label">Vắng / chưa nhận diện</div><div class="value" id="attAbsent">-</div></div>
         </div>
         <div class="att-grid groups">
-          <div class="mini"><div class="label">Hoạt động quan sát</div><div class="value" id="attActivity">-</div></div>
-          <div class="mini review"><div class="label">Cần xem lại</div><div class="value" id="attReview">-</div></div>
-          <div class="mini"><div class="label">Không xác định</div><div class="value" id="attUnknown">-</div></div>
+          <div class="mini"><div class="label">Độ bao phủ C</div><div class="value" id="attCoverage">-</div></div>
+          <div class="mini"><div class="label">P_E (bằng chứng nhiệm vụ)</div><div class="value" id="attPE">-</div></div>
+          <div class="mini review"><div class="label">P_R (cần xem lại)</div><div class="value" id="attPR">-</div></div>
+          <div class="mini"><div class="label">P_N (chưa đủ căn cứ)</div><div class="value" id="attPN">-</div></div>
+          <div class="mini"><div class="label">P_U (thiếu quan sát)</div><div class="value" id="attPU">-</div></div>
+          <div class="mini"><div class="label">BEEI (phụ)</div><div class="value" id="attBEEI">-</div></div>
         </div>
-        <div class="lg-section">Tỷ lệ thời gian cần giáo viên xem lại</div>
+        <div class="att-grid groups">
+          <div class="mini"><div class="label">Tín hiệu B1/B2 (giây)</div><div class="value" id="attActivity">-</div></div>
+          <div class="mini review"><div class="label">Tín hiệu B4/B5 (giây)</div><div class="value" id="attReview">-</div></div>
+          <div class="mini"><div class="label">Thiếu pose (giây)</div><div class="value" id="attUnknown">-</div></div>
+        </div>
+        <div class="lg-section">Tỷ lệ khung có tín hiệu cần xem (B4/B5) theo phút</div>
         <div class="trend" id="attTrend"><span class="empty">Chưa có dữ liệu</span></div>
-        <div class="lg-section">Có mặt — tư thế cần xem xếp trước</div>
+        <div class="lg-section">Có mặt — P_R / tín hiệu cần xem xếp trước</div>
         <div id="attList"><span class="empty">Chưa nhận diện được học sinh nào</span></div>
         <div class="lg-section">Vắng / chưa nhận diện (<span id="attAbsentN">0</span>)</div>
         <div class="chips" id="attAbsentList"><span class="empty">—</span></div>
@@ -377,8 +385,8 @@ svg { flex-shrink: 0; }
 
       <div class="tab-panel" id="tab-students">
         <div class="legend-inline">
-          <span><i style="background:#eb3c3c"></i>Cần xem</span>
-          <span><i style="background:#38bdf8"></i>Hoạt động</span>
+          <span><i style="background:#eb3c3c"></i>Cần xem (B4/B5)</span>
+          <span><i style="background:#38bdf8"></i>Hoạt động (B1/B2)</span>
           <span><i style="background:#94a3b8"></i>Không gắn cảnh báo</span>
           <span><i style="background:#46a0c8"></i>Chưa đủ tư thế</span>
         </div>
@@ -393,34 +401,37 @@ svg { flex-shrink: 0; }
         </div>
         <div id="legendList"><span class="empty">Đang tải chú thích...</span></div>
         <div class="lg-section">Màu khung &amp; nhãn trên video</div>
-        <div class="lg-box"><i style="border-color:#eb3c3c"></i>Cần xem — cúi đầu lâu hoặc gục xuống bàn (viền dày)</div>
-        <div class="lg-box"><i style="border-color:#38bdf8"></i>Hoạt động quan sát được — giơ tay, viết bài, quay đầu</div>
-        <div class="lg-box"><i style="border-color:#94a3b8"></i>Có tư thế, không gắn cảnh báo</div>
+        <div class="lg-box"><i style="border-color:#eb3c3c"></i>Cần xem (B4/B5) — cúi đầu lâu hoặc gục xuống bàn; diễn giải R tùy ngữ cảnh A</div>
+        <div class="lg-box"><i style="border-color:#38bdf8"></i>Hoạt động (B1/B2) — giơ tay, viết bài; diễn giải E tùy ngữ cảnh A</div>
+        <div class="lg-box"><i style="border-color:#94a3b8"></i>Có tư thế, không gắn cảnh báo (ngồi bình thường → N theo ERNU)</div>
         <div class="lg-box"><i style="border-color:#f59e0b"></i>Nghiêng người — chỉ ghi tư thế</div>
+        <div class="lg-box"><i style="border-color:#22c55e"></i>E/R/N/U — nhãn cửa sổ 10s trên báo cáo Excel (không phải điểm tập trung)</div>
         <div class="lg-box"><i style="border-color:#46a0c8"></i>Không xác định — che khuất, quay lưng hoặc thiếu điểm khớp</div>
         <div class="lg-box"><b>1 · Cúi đầu lâu</b>&nbsp;= số thứ tự trong danh sách (1 đến hết) · hành vi chính</div>
         <div class="lg-box"><b>ID7</b>&nbsp;= chưa nhận diện được học sinh (số theo dõi tạm)</div>
-        <div class="lg-box"><span class="tag lock" style="margin-left:0">khóa</span>&nbsp;= khóa cứng mã HS (ArcFace ≥ <span class="lgHardPct">45</span>% và hơn người khớp nhì ≥ <span class="lgHardMargin">10</span>%) — chỉ đổi khi HS khác khớp % cao hơn</div>
+        <div class="lg-box"><span class="tag lock" style="margin-left:0">khóa</span>&nbsp;= khóa cứng mã HS (điểm tương đồng quy đổi ArcFace ≥ <span class="lgHardPct">45</span>% và hơn người khớp nhì ≥ <span class="lgHardMargin">10</span>%) — chỉ đổi khi HS khác có điểm cao hơn</div>
+        <div class="lg-box"><b>Điểm tương đồng quy đổi (%)</b>&nbsp;= cosine × 100, không phải xác suất nhận diện đúng.</div>
       </div>
 
       <div class="tab-panel" id="tab-arcface">
-        <div class="lg-section">Ngưỡng ArcFace — áp dụng ngay, lưu cho lần sau</div>
+        <div class="lg-section">Ngưỡng ArcFace — điểm tương đồng quy đổi (%), áp dụng ngay</div>
         <div class="th-row">
           <div class="th-head"><span>Ngưỡng nhận diện</span><b><span id="thMatchVal">-</span>%</b></div>
           <input type="range" id="thMatch" min="10" max="80" step="1">
-          <div class="th-help">Mặt giống ảnh mẫu từ mức này trở lên mới gắn tên. Thấp: nhận ra được nhiều em hơn nhưng dễ gắn nhầm tên;
-            cao: ít nhầm hơn nhưng em ngồi xa / nghiêng mặt có thể không được nhận ra (bị tính vắng).</div>
+          <div class="th-help">Điểm tương đồng quy đổi từ mức này trở lên mới gắn tên. Thấp: nhận nhiều hơn nhưng dễ nhầm;
+            cao: ít nhầm hơn nhưng em ngồi xa / nghiêng mặt có thể không được nhận ra (bị tính vắng).
+            Không dùng thuật ngữ “độ chính xác nhận diện (%)”.</div>
         </div>
         <div class="th-row">
           <div class="th-head"><span>Ngưỡng khóa cứng</span><b><span id="thHardVal">-</span>%</b></div>
           <input type="range" id="thHard" min="10" max="90" step="1">
-          <div class="th-help">Khớp từ mức này trở lên (và hơn người khớp nhì đủ xa) thì giữ chặt mã HS, chỉ đổi khi HS khác
-            khớp cao hơn. Không thấp hơn ngưỡng nhận diện.</div>
+          <div class="th-help">Điểm tương đồng từ mức này trở lên (và hơn người khớp nhì đủ xa) thì giữ chặt mã HS, chỉ đổi khi HS khác
+            có điểm cao hơn. Không thấp hơn ngưỡng nhận diện.</div>
         </div>
         <div class="th-row">
           <div class="th-head"><span>Chênh lệch tối thiểu để khóa cứng</span><b><span id="thMarginVal">-</span>%</b></div>
           <input type="range" id="thMargin" min="0" max="30" step="1">
-          <div class="th-help">Người khớp nhất phải hơn người khớp thứ hai ít nhất mức này.</div>
+          <div class="th-help">Người khớp nhất phải hơn người khớp thứ hai ít nhất mức này (điểm tương đồng quy đổi).</div>
         </div>
         <div class="th-stats" id="thStats"></div>
         <div id="thDirty">Chưa áp dụng — bấm Áp dụng để lưu.</div>
@@ -576,9 +587,9 @@ async function saveThresholds() {
     const data = await res.json();
     if (!res.ok) throw new Error(data.detail || res.status);
     renderThresholds(data);
-    log(`Ngưỡng ArcFace: nhận diện ≥ ${data.match_pct}%, khóa cứng ≥ ${data.hard_lock_pct}% ` +
+    log(`Ngưỡng ArcFace (điểm tương đồng quy đổi): nhận diện ≥ ${data.match_pct}%, khóa cứng ≥ ${data.hard_lock_pct}% ` +
       `(hơn người nhì ≥ ${data.hard_lock_margin_pct}%)` +
-      (data.dropped ? ` — bỏ tên ${data.dropped} người khớp dưới ngưỡng mới` : ''));
+      (data.dropped ? ` — bỏ tên ${data.dropped} người dưới ngưỡng mới` : ''));
   } catch (err) {
     log('Không đổi được ngưỡng ArcFace: ' + err.message);
     updateThresholdLabels();
@@ -663,26 +674,63 @@ function renderSummary(data) {
   setText('attUnknown', fmtSecs(data.class_unknown_secs));
   setText('attAbsentN', absent.length);
 
+  const ernu = data.ernu || {};
+  const pct = v => (v == null || v === undefined) ? '—' : `${v}%`;
+  if (ernu.data_status === 'Chưa đủ dữ liệu') {
+    setText('attCoverage', ernu.C != null ? pct(ernu.C) : 'Chưa đủ dữ liệu');
+    setText('attPE', '—');
+    setText('attPR', '—');
+    setText('attPN', '—');
+    setText('attPU', pct(ernu.P_U));
+    setText('attBEEI', '—');
+  } else {
+    setText('attCoverage', pct(ernu.C));
+    setText('attPE', pct(ernu.P_E));
+    setText('attPR', pct(ernu.P_R));
+    setText('attPN', pct(ernu.P_N));
+    setText('attPU', pct(ernu.P_U));
+    const beeiTxt = ernu.BEEI != null ? String(ernu.BEEI) : '—';
+    setText('attBEEI', ernu.publishable === false ? `${beeiTxt} (C thấp)` : beeiTxt);
+  }
+
   document.getElementById('attTrend').innerHTML = (data.timeline || []).length
     ? trendSvg(data.timeline)
     : '<span class="empty">Chưa có dữ liệu</span>';
 
   document.getElementById('attList').innerHTML = present.length
     ? present.slice()
-      .sort((a, b) => (b.review_secs || 0) - (a.review_secs || 0) || (b.unknown_secs || 0) - (a.unknown_secs || 0))
+      .sort((a, b) => {
+        const ar = (a.ernu && a.ernu.P_R) || 0, br = (b.ernu && b.ernu.P_R) || 0;
+        if (br !== ar) return br - ar;
+        return (b.review_secs || 0) - (a.review_secs || 0) || (b.unknown_secs || 0) - (a.unknown_secs || 0);
+      })
       .map(s => {
-        const cls = (s.review_secs || 0) > 0 ? 'review' : ((s.activity_secs || 0) > 0 ? 'activity' : 'clear');
+        const e = s.ernu || {};
+        const cls = (e.P_R || 0) > 0 || (s.review_secs || 0) > 0
+          ? 'review'
+          : ((e.P_E || 0) > 0 || (s.activity_secs || 0) > 0 ? 'activity' : 'clear');
         const dot = onFrameIds.has(s.student_id) ? '<span class="on-frame" title="Đang trên khung"></span>' : '';
         const tags = []
-          .concat(s.review || [], s.activity || [], s.posture || [])
+          .concat(s.review || [], s.activity || [], s.neutral || [], s.posture || [])
           .map(b => {
-            const kind = (s.review || []).includes(b) ? 'review' : ((s.posture || []).includes(b) ? 'posture' : 'activity');
+            const kind = (s.review || []).includes(b) ? 'review'
+              : ((s.posture || []).includes(b) ? 'posture' : 'activity');
             return `<span class="tag ${kind}" title="${esc(b.name)}: ${b.count} lần, ${b.secs} giây">${esc(b.name)} ${fmtSecs(b.secs)}</span>`;
           }).join('');
         const bits = [];
-        if (s.review_secs) bits.push(`Cần xem ${fmtSecs(s.review_secs)}`);
-        if (s.activity_secs) bits.push(`Hoạt động ${fmtSecs(s.activity_secs)}`);
-        if (s.unknown_secs) bits.push(`Chưa rõ ${fmtSecs(s.unknown_secs)}`);
+        if (e.data_status === 'Chưa đủ dữ liệu') {
+          bits.push('ERNU: chưa đủ dữ liệu');
+        } else if (e.C != null) {
+          bits.push(`C ${e.C}%`);
+          if (e.P_E != null) bits.push(`E ${e.P_E}%`);
+          if (e.P_R != null) bits.push(`R ${e.P_R}%`);
+          if (e.P_N != null) bits.push(`N ${e.P_N}%`);
+          if (e.P_U != null) bits.push(`U ${e.P_U}%`);
+          if (e.BEEI != null) bits.push(`BEEI ${e.BEEI}`);
+        }
+        if (s.review_secs) bits.push(`B4/B5 ${fmtSecs(s.review_secs)}`);
+        if (s.activity_secs) bits.push(`B1/B2 ${fmtSecs(s.activity_secs)}`);
+        if (s.unknown_secs) bits.push(`Thiếu pose ${fmtSecs(s.unknown_secs)}`);
         if (s.first_seen) bits.push(`vào khung ${esc(s.first_seen)}`);
         return '<div class="student-row">' +
           `<div class="id-badge ${cls}">${esc(boxCode(s))}</div>` +
@@ -699,10 +747,14 @@ function renderSummary(data) {
     ? absent.map(s => `<span class="chip" title="${esc(s.student_id)}">${esc(s.name || s.student_id)}</span>`).join('')
     : '<span class="empty">Đủ sĩ số</span>';
 
+  const interp = (ernu.interpretation || '').trim();
   document.getElementById('attNote').textContent =
     (data.unknown_tracks ? `${data.unknown_tracks} người trên khung chưa nhận diện được mặt (chưa tính vào có mặt). ` : '') +
-    'Sĩ số theo danh sách học sinh đã nạp (gallery ArcFace). Học sinh chưa nhận diện được mặt sẽ nằm ở mục Vắng. ' +
-    'Cúi đầu lâu và gục xuống bàn là tư thế cần giáo viên xem lại.';
+    (interp ? interp + ' ' : '') +
+    'E/R/N/U là nhãn cửa sổ 10 giây theo bộ tiêu chí ERNU — không phải điểm tập trung nhận thức. ' +
+    'BEEI chỉ là chỉ số phụ; khi coverage thấp không dùng đơn độc / không xếp hạng học sinh. ' +
+    'Mặc định ngữ cảnh A1 nếu chưa nạp ACTIVITY_CONTEXT (biến ERNU_ACTIVITY_CONTEXT hoặc /api/ernu/activity-context). ' +
+    'Sĩ số theo danh sách gallery ArcFace.';
 }
 
 function renderStats(data) {
@@ -730,8 +782,8 @@ function renderStats(data) {
       const cls = s.group || 'unknown';
       const badge = s.known ? boxCode(s) : ('ID' + s.id);
       const who = s.known ? (s.name || s.student_id) : 'Chưa nhận diện';
-      const pct = s.match_pct != null ? ` (${Math.round(s.match_pct)}%)` : '';
-      const lock = s.hard_locked ? '<span class="tag lock" title="Khóa cứng: chỉ đổi khi học sinh khác khớp % cao hơn">khóa</span>' : '';
+      const pct = s.match_pct != null ? ` (tương đồng ${Math.round(s.match_pct)}%)` : '';
+      const lock = s.hard_locked ? '<span class="tag lock" title="Khóa cứng: chỉ đổi khi học sinh khác có điểm tương đồng quy đổi cao hơn">khóa</span>' : '';
       const why = s.posed ? reasonTags(s.reasons) : '<span class="tag unknown">Chưa thấy tư thế</span>';
       return '<div class="student-row">' +
         `<div class="id-badge ${cls}">${esc(badge)}</div>` +
@@ -1079,6 +1131,12 @@ function clearSessionBoard() {
   setText('attActivity', '-');
   setText('attReview', '-');
   setText('attUnknown', '-');
+  setText('attCoverage', '-');
+  setText('attPE', '-');
+  setText('attPR', '-');
+  setText('attPN', '-');
+  setText('attPU', '-');
+  setText('attBEEI', '-');
   setText('attAbsentN', '0');
   document.getElementById('attTrend').innerHTML = '<span class="empty">Chưa có dữ liệu</span>';
   document.getElementById('attList').innerHTML = betweenSessions

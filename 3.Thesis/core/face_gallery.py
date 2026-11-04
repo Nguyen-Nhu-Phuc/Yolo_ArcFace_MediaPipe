@@ -125,7 +125,10 @@ def _load_thresholds_from_meta() -> None:
 
 
 def sim_to_pct(sim: float) -> float:
-    """Cosine similarity → % tương thích (0–100)."""
+    """Cosine similarity → điểm tương đồng quy đổi (%) 0–100.
+
+    Đây là phép quy đổi tuyến tính, không phải xác suất nhận diện đúng.
+    """
     return max(0.0, min(100.0, float(sim) * 100.0))
 
 
@@ -379,6 +382,19 @@ class FaceRecognizer:
         """True nếu % tương thích ≥ MIN_COMPAT_PCT (và ≥ match_threshold)."""
         return sim_to_pct(sim) >= self.min_compat_pct and float(sim) >= self.match_threshold
 
+    def _accept_match(self, best_sim: float, margin: float, n_gallery: int) -> bool:
+        """Chấp nhận top-1 khi đủ tương thích và không mơ hồ với top-2.
+
+        Gallery 1 người: không có đối thủ → chỉ cần vượt ngưỡng tương thích.
+        Gallery ≥2: cần điểm ≥ lock_sim hoặc chênh lệch ≥ min_margin
+        (không dùng margin >= 0.0 — điều kiện đó làm mất tác dụng kiểm tra margin).
+        """
+        if not self.is_compatible(best_sim):
+            return False
+        if n_gallery <= 1:
+            return True
+        return best_sim >= self.lock_sim or margin >= self.min_margin
+
     def match(
         self, face_bgr: np.ndarray, detector: str | None = None
     ) -> tuple[str | None, str | None, float, float]:
@@ -391,12 +407,8 @@ class FaceRecognizer:
         best_sim = float(sims[best_i])
         second = float(sims[order[1]]) if len(order) > 1 else 0.0
         margin = best_sim - second
-        # Gán khi ≥ ngưỡng %; margin chỉ nới khi điểm còn sát ngưỡng
-        if self.is_compatible(best_sim):
-            strong = best_sim >= self.lock_sim or margin >= self.min_margin
-            near_ok = best_sim >= (self.match_threshold + 0.04) or margin >= 0.0
-            if strong or near_ok:
-                return self.ids[best_i], self.names[best_i], best_sim, margin
+        if self._accept_match(best_sim, margin, len(order)):
+            return self.ids[best_i], self.names[best_i], best_sim, margin
         return None, None, best_sim, margin
 
     def _match_embedding(
@@ -413,11 +425,8 @@ class FaceRecognizer:
         best_sim = float(sims[best_i])
         second = float(sims[order[1]]) if len(order) > 1 else 0.0
         margin = best_sim - second
-        if self.is_compatible(best_sim):
-            strong = best_sim >= self.lock_sim or margin >= self.min_margin
-            near_ok = best_sim >= (self.match_threshold + 0.04) or margin >= 0.0
-            if strong or near_ok:
-                return self.ids[best_i], self.names[best_i], best_sim, margin
+        if self._accept_match(best_sim, margin, len(order)):
+            return self.ids[best_i], self.names[best_i], best_sim, margin
         return None, None, best_sim, margin
 
     def match_person_crop(

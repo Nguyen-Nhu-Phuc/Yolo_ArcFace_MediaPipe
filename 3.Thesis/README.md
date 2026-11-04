@@ -65,12 +65,11 @@ Tab **Lớp học** cập nhật mỗi giây, tính trên cả phiên:
 - **Sĩ số**: có mặt / tổng số học sinh trong gallery ArcFace. Một học sinh được tính có mặt khi
   ArcFace nhận ra mã HS đó ở ít nhất 3 lần phân tích. Học sinh chưa nhận ra được nằm ở mục
   **Vắng / chưa nhận diện**.
-- **Ba nhóm**:
-  - hoạt động quan sát được: giơ tay, viết bài, quay đầu
-  - tư thế cần giáo viên xem lại: cúi đầu lâu, gục xuống bàn
-  - không xác định: bị che khuất, quay lưng hoặc thiếu điểm khớp
-- Biểu đồ theo phút là tỷ lệ thời gian có tư thế cần xem lại.
-- **Từng học sinh có mặt** (tư thế cần xem xếp trước): thời lượng từng nhóm và giờ vào khung.
+- **Chỉ số ERNU (cửa sổ 10s)**: độ bao phủ C; P_E / P_R / P_N trên thời gian quan sát hợp lệ; P_U trên toàn phiên; BEEI (phụ).
+- **Tín hiệu thô B1–B5**: giơ tay, viết bài, quay đầu (trung tính → N), cúi đầu lâu / gục bàn (xem lại tùy A), thiếu pose.
+- Biểu đồ theo phút là tỷ lệ khung có tín hiệu B4/B5.
+- **Từng học sinh có mặt** (P_R / tín hiệu cần xem xếp trước): thời lượng và chỉ số ERNU.
+- Không đồng nhất tư thế với tập trung nhận thức; không xếp hạng học sinh bằng chỉ số.
 
 ## Báo cáo Excel hành vi
 
@@ -155,13 +154,33 @@ thử hàng trăm bộ ngưỡng trong vài giây mà không phải chạy lại
    Một đợt dự đoán được tính là khớp nhãn khi cùng HS, cùng hành vi và phần chồng lên nhau ≥ 30% đợt ngắn hơn.
    Bộ tham số tốt nhất thì ghi vào `BehaviorConfig` trong `core/config.py`.
 
+## Bộ tiêu chí ERNU (E/R/N/U)
+
+Diễn giải hành vi thô theo ngữ cảnh A1–A5 → nhãn cửa sổ E/R/N/U (`core/ernu.py`).
+Quy tắc đã khóa: `03_EVIDENCE_STAGE1/config/ernu_rules_v1.json`.
+
+```bash
+# Nạp bảng ACTIVITY_CONTEXT (A1–A5 do giáo viên xác nhận)
+set ERNU_ACTIVITY_CONTEXT=..\Mau_Gan_Nhan_Hanh_Vi_Lop_Hoc.xlsx
+
+# Tạo / cập nhật workbook gán nhãn đối chứng (Phụ lục A)
+python -m tools.make_annotation_workbook
+
+# Đối chiếu GT độc lập (không dùng pred làm GT)
+python -m tools.eval_ernu --gt ../Mau_Gan_Nhan_Hanh_Vi_Lop_Hoc.xlsx --pred reports/bao_cao_....xlsx
+```
+
+Excel xuất thêm sheet `PREDICTED_WINDOWS`, `TONG_HOP_ERNU`, `DIEN_GIAI_ERNU`.
+Checklist trước kiểm thử cuối: `03_EVIDENCE_STAGE1/tests/checklist_ERNU_Phu_luc_B.md`.
+
 ## Màu box
 
-- Đỏ, viền dày: tư thế cần giáo viên xem (cúi đầu lâu, gục xuống bàn)
-- Xanh dương: hoạt động quan sát được (giơ tay, viết bài, quay đầu)
-- Xám: có tư thế, không gắn cảnh báo
+- Đỏ, viền dày: tín hiệu cần xem (B4/B5 — cúi đầu lâu, gục xuống bàn); diễn giải R tùy A
+- Xanh dương: tín hiệu hoạt động (B1/B2 — giơ tay, viết bài); diễn giải E tùy A
+- Xám: có tư thế, không gắn cảnh báo (ngồi bình thường → N)
+- Xanh lá nhạt trên chú thích: quay đầu (B3) — trung tính → N theo ERNU
 - Vàng: nghiêng người (chỉ ghi tư thế)
-- Xanh nhạt: chưa đủ tư thế hoặc không xác định
+- Xanh nhạt: chưa đủ tư thế hoặc không xác định (→ U khi coverage thấp)
 
 Nhãn trên khung: `1 · Cúi đầu lâu` = số thứ tự trong danh sách học sinh (HS7_01 là 1, đến HS7_33 là 33) và hành vi chính. File Excel vẫn ghi mã HS7_01. Chưa nhận diện được thì hiện `ID<track>`.
 
@@ -172,6 +191,7 @@ Nhãn trên khung: `1 · Cúi đầu lâu` = số thứ tự trong danh sách h�
 | `YOLO_WEIGHTS` | `classroom` = YOLOv12n train cho lớp; `coco` = `yolo12n.pt` | `classroom` |
 | `YOLO_MODEL_PATH` | Đường dẫn `.pt` YOLO bất kỳ (ghi đè) | — |
 | `POSE_MODEL` | Model pose | `models/yolo11n-pose.pt` |
+| `ERNU_ACTIVITY_CONTEXT` | File `.xlsx`/`.json` bảng A1–A5 | (trống → mặc định A1) |
 | `CLASSROOM_FACES_DIR` / `ARCFACE_MODEL_DIR` | Dataset / gallery ArcFace | `2.Data/2_dataset_arcface` |
 
 Ngưỡng hành vi nằm trong `core/config.py` (`BehaviorConfig`).

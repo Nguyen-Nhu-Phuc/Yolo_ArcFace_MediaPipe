@@ -184,6 +184,7 @@ class _StreamSession:
             legend_fn=lambda: behavior_legend(_config),
             student_classes=self._student_classes,
             default_class=self._default_class,
+            ernu_cfg=_config.ernu,
         )
 
     def _open_keypoint_log(self) -> KeypointLogger | None:
@@ -440,6 +441,83 @@ async def set_behaviors(request: Request):
     save_behavior_settings(_config)
     return {
         "behaviors": behavior_legend(_config),
+    }
+
+
+@app.get("/api/ernu")
+def ernu_config():
+    """Cấu hình diễn giải E/R/N/U + đường dẫn ACTIVITY_CONTEXT."""
+    e = _config.ernu
+    return {
+        "rules_version": e.rules_version,
+        "window_sec": e.window_sec,
+        "c_min": e.c_min,
+        "publish_c_min": e.publish_c_min,
+        "default_activity": e.default_activity,
+        "activity_context_path": e.activity_context_path,
+        "min_duration": {
+            "B1": e.min_duration_b1,
+            "B2": e.min_duration_b2,
+            "B3": e.min_duration_b3,
+            "B4": e.min_duration_b4,
+            "B5": e.min_duration_b5,
+        },
+        "beei_weights": {"w_E": e.beei_w_e, "w_R": e.beei_w_r, "w_N": e.beei_w_n},
+        "disclaimer": (
+            "E/R/N/U không phải điểm tập trung nhận thức. "
+            "BEEI chỉ là chỉ số phụ. Không xếp hạng học sinh."
+        ),
+    }
+
+
+@app.post("/api/ernu/activity-context")
+async def set_activity_context(request: Request):
+    """Gán đường dẫn ACTIVITY_CONTEXT (.xlsx/.json) hoặc segments JSON.
+
+    Body: {"path": "..."} hoặc {"segments": [{"start_sec", "end_sec", "activity_code", ...}]}.
+    Áp dụng cho phiên đang ghi (recorder) và cấu hình toàn cục.
+    """
+    from core.activity_context import load_activity_context
+
+    body = await request.json()
+    path = (body.get("path") or "").strip()
+    segments = body.get("segments")
+    if path:
+        _config.ernu.activity_context_path = path
+        segs = load_activity_context(path)
+    elif isinstance(segments, list):
+        segs = []
+        for row in segments:
+            try:
+                s, e = float(row["start_sec"]), float(row["end_sec"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            if e <= s:
+                continue
+            code = str(row.get("activity_code") or "").strip().upper()
+            if code not in ("A1", "A2", "A3", "A4", "A5"):
+                continue
+            segs.append({
+                "start_sec": s, "end_sec": e, "activity_code": code,
+                "teacher_task": str(row.get("teacher_task") or row.get("task_note") or ""),
+                "annotator_id": str(row.get("annotator_id") or ""),
+                "notes": str(row.get("notes") or ""),
+            })
+    else:
+        raise HTTPException(400, "Cần path hoặc segments")
+
+    applied = 0
+    with _sessions_lock:
+        sessions = list(_sessions)
+    for s in sessions:
+        s.recorder.activity_segments = list(segs)
+        applied += 1
+    return {
+        "ok": True,
+        "n_segments": len(segs),
+        "sessions_updated": applied,
+        "activity_context_path": _config.ernu.activity_context_path,
+        "default_activity": _config.ernu.default_activity,
     }
 
 

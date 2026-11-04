@@ -1,0 +1,54 @@
+{
+  "rules_version": "ernu-v1",
+  "source": "Bo_tieu_chi_ERNU_thuc_nghiem_luan_van.docx",
+  "locked_note": "Khóa trước tập kiểm thử cuối. Chỉ hiệu chỉnh trên tập phát triển/hiệu chỉnh.",
+  "window_sec": 10.0,
+  "c_min": 0.70,
+  "publish_c_min": 0.70,
+  "min_duration_sec": {
+    "B1": 1.0,
+    "B2": 0.0,
+    "B3": 2.0,
+    "B4": 5.0,
+    "B5": 5.0
+  },
+  "default_activity": "A1",
+  "activities": {
+    "A1": "Nghe giảng / quan sát bảng",
+    "A2": "Ghi chép / làm bài cá nhân",
+    "A3": "Đọc sách / tài liệu",
+    "A4": "Hỏi đáp / phát biểu",
+    "A5": "Thảo luận nhóm / theo cặp"
+  },
+  "matrix": {
+    "B1": {"A1": "E", "A2": "E", "A3": "E", "A4": "E", "A5": "E"},
+    "B2": {"A1": "N", "A2": "E", "A3": "N", "A4": "N", "A5": "N"},
+    "B3": {"A1": "N", "A2": "N", "A3": "N", "A4": "N", "A5": "N"},
+    "B4": {"A1": "R", "A2": "N", "A3": "N", "A4": "R", "A5": "N"},
+    "B5": {"A1": "R", "A2": "R", "A3": "R", "A4": "R", "A5": "R"},
+    "NORMAL": {"A1": "N", "A2": "N", "A3": "N", "A4": "N", "A5": "N"},
+    "MISSING": {"A1": "U", "A2": "U", "A3": "U", "A4": "U", "A5": "U"}
+  },
+  "conflict_rules": [
+    "B2→E trong A2 không bị biến thành R chỉ vì B4 (cúi đầu)",
+    "Nếu E và R cùng xuất hiện và không phân định → N + mixed=true"
+  ],
+  "beei": {
+    "w_E": 1.0,
+    "w_R": 0.0,
+    "w_N": 0.5,
+    "sensitivity_w_N": [0.0, 0.5, 1.0],
+    "note": "Chỉ số phụ dashboard; không phải điểm tập trung / xác suất / học lực."
+  },
+  "dataset_split_example": {
+    "phat_trien": ["L01_V01", "L02_V01"],
+    "hieu_chinh": ["L01_V02", "L02_V02"],
+    "kiem_thu_cuoi": ["L01_V03", "L02_V03"]
+  },
+  "labels": {
+    "E": "Có bằng chứng thực hiện nhiệm vụ học tập",
+    "R": "Có dấu hiệu cần giáo viên xem lại",
+    "N": "Quan sát được nhưng chưa đủ căn cứ",
+    "U": "Không đủ dữ liệu quan sát"
+  }
+}

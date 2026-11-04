@@ -109,6 +109,49 @@ def main() -> None:
             "correct_id": correct / n, "wrong_id": wrong / n, "rejected": (n - correct - wrong) / n,
         })
 
+    # So sánh quy tắc cũ (near_ok / margin>=0) với quy tắc mới (lock_sim hoặc min_margin)
+    # Dùng ngưỡng mặc định gần với meta gallery; không phải tối ưu đã chứng minh.
+    match_th, min_margin, lock_sim = 0.45, 0.004, 0.55
+
+    def accept_old(r: dict) -> bool:
+        best, margin = r["best_sim"], r["margin"]
+        if best < match_th:
+            return False
+        strong = best >= lock_sim or margin >= min_margin
+        near_ok = best >= (match_th + 0.04) or margin >= 0.0
+        return strong or near_ok
+
+    def accept_new(r: dict) -> bool:
+        best, margin = r["best_sim"], r["margin"]
+        if best < match_th:
+            return False
+        return best >= lock_sim or margin >= min_margin
+
+    def classify(accept_fn):
+        correct = wrong = reject = 0
+        for r in rows:
+            if not accept_fn(r):
+                reject += 1
+            elif r["rank"] == 1 and r["best"] == r["student"]:
+                correct += 1
+            else:
+                wrong += 1
+        return {
+            "correct": correct, "wrong": wrong, "reject": reject,
+            "correct_rate": correct / n if n else 0.0,
+            "wrong_rate": wrong / n if n else 0.0,
+            "reject_rate": reject / n if n else 0.0,
+        }
+
+    margin_compare = {
+        "note": "Điểm tương đồng quy đổi (%) = cosine×100, không phải xác suất nhận diện đúng.",
+        "match_threshold": match_th,
+        "min_margin": min_margin,
+        "lock_sim": lock_sim,
+        "old_near_ok_margin_ge_0": classify(accept_old),
+        "new_lock_or_min_margin": classify(accept_new),
+    }
+
     per_angle = defaultdict(list)
     for r in rows:
         per_angle[r["angle"]].append(r)
@@ -129,6 +172,7 @@ def main() -> None:
         "impostor": _stats(impostor),
         "gallery_offdiag": _stats((gallery @ gallery.T)[~np.eye(len(ids), dtype=bool)]),
         "thresholds": thresholds,
+        "margin_rule_compare": margin_compare,
         "per_angle": {
             a: {"n": len(rs), "rank1": sum(r["rank"] == 1 for r in rs) / len(rs),
                 "genuine_mean": float(np.mean([r["own_sim"] for r in rs])),
@@ -154,6 +198,10 @@ def main() -> None:
     for t in thresholds:
         print(f"{t['threshold']:>7.2f}{t['tar']:>8.1%}{t['far']:>8.2%}{t['frr']:>8.1%}"
               f"{t['correct_id']:>11.1%}{t['wrong_id']:>11.1%}")
+    old_m, new_m = margin_compare["old_near_ok_margin_ge_0"], margin_compare["new_lock_or_min_margin"]
+    print("So sánh quy tắc margin (cũ near_ok / mới lock|min_margin):")
+    print(f"  Cũ: đúng {old_m['correct']} · nhầm {old_m['wrong']} · từ chối {old_m['reject']}")
+    print(f"  Mới: đúng {new_m['correct']} · nhầm {new_m['wrong']} · từ chối {new_m['reject']}")
     print(f"→ {out}")
 
 

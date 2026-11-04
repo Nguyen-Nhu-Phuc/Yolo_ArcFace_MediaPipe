@@ -100,8 +100,48 @@ def _resolve_yolo_weights() -> str:
 
 
 @dataclass
+class ErnuConfig:
+    """Ngưỡng diễn giải E/R/N/U theo cửa sổ — giá trị khởi tạo để thử nghiệm, chưa kiểm chứng.
+
+    Khóa trước tập kiểm thử cuối (Phụ lục B). C_min và min_duration_* xuất phát từ
+    bộ tiêu chí ERNU; không tinh chỉnh theo video kiểm thử cuối.
+    """
+
+    window_sec: float = 10.0
+    c_min: float = 0.70  # coverage tối thiểu cửa sổ; dưới mức này → U
+    # Ngưỡng thời lượng tín hiệu B (giây) khi gán nhãn cửa sổ — khớp BehaviorConfig khởi tạo
+    min_duration_b1: float = 1.0   # giơ tay
+    min_duration_b2: float = 0.0   # viết bài: detector đã yêu cầu chuyển động; không cắt thêm
+    min_duration_b3: float = 2.0   # quay đầu
+    min_duration_b4: float = 5.0   # cúi đầu lâu
+    min_duration_b5: float = 5.0   # gục xuống bàn
+    # Công bố thống kê lớp/HS chỉ khi C ≥ publish_c_min và T_valid > 0
+    publish_c_min: float = 0.70
+    rules_version: str = "ernu-v1"
+    default_activity: str = "A1"
+    # BEEI phụ: (w_E, w_R, w_N); xuất thêm w_N=0 và w_N=1 để phân tích độ nhạy
+    beei_w_e: float = 1.0
+    beei_w_r: float = 0.0
+    beei_w_n: float = 0.5
+    # Đường dẫn ACTIVITY_CONTEXT (.xlsx/.json); rỗng → mặc định A1 cả phiên
+    activity_context_path: str = field(
+        default_factory=lambda: (os.environ.get("ERNU_ACTIVITY_CONTEXT") or "").strip()
+    )
+
+    def min_duration(self, b_code: str) -> float:
+        return {
+            "B1": self.min_duration_b1,
+            "B2": self.min_duration_b2,
+            "B3": self.min_duration_b3,
+            "B4": self.min_duration_b4,
+            "B5": self.min_duration_b5,
+        }.get(b_code, 0.0)
+
+
+@dataclass
 class Config:
     behavior: BehaviorConfig = field(default_factory=BehaviorConfig)
+    ernu: ErnuConfig = field(default_factory=ErnuConfig)
 
     yolo_model: str = field(default_factory=_resolve_yolo_weights)
     yolo_imgsz: int = 640

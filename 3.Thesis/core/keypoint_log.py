@@ -48,19 +48,26 @@ class KeypointLogger:
     def log(self, frame_idx: int, fps_eff: float, detections: list[dict]) -> None:
         if self._f.closed:
             return
-        tracks = [
-            {
+        tracks = []
+        for d in detections:
+            if not d.get("key"):
+                continue
+            kpts = d.get("keypoints")
+            row = {
                 "tid": d["track_id"],
                 "sid": d.get("student_id"),
                 "key": d["key"],
                 "box": [d["x1"], d["y1"], d["x2"], d["y2"]],
-                "kpts": [[round(float(v), 1 if i < 2 else 3) for i, v in enumerate(p)]
-                         for p in d["keypoints"]],
+                "pose_status": d.get("pose_status") or ("ok" if kpts is not None else "missing"),
+                "kpts": (
+                    [[round(float(v), 1 if i < 2 else 3) for i, v in enumerate(p)]
+                     for p in kpts]
+                    if kpts is not None else None
+                ),
                 "signals": d.get("signals") or {},
+                "reasons": list(d.get("reasons") or []),
             }
-            for d in detections
-            if d.get("keypoints") is not None and d.get("key")
-        ]
+            tracks.append(row)
         self._write({
             "idx": frame_idx,
             "t": round(frame_idx / self.fps, 3),

@@ -1,5 +1,9 @@
 """Nhận biết hành vi từ keypoint COCO-17 (YOLO-pose).
 
+Ngưỡng trong BehaviorConfig là giá trị khởi đầu: giữ cố định khi đo kết quả cuối;
+chỉ hiệu chỉnh trên tập phát triển (eval_behavior.py), không tinh chỉnh theo từng video kiểm thử cuối.
+
+
 Hậu xử lý, không đổi mô hình pose:
   - bỏ điểm khớp có độ tin cậy < 0,5; làm mượt tọa độ bằng EMA (0,6 cho giá trị mới)
   - chuẩn hóa theo bề rộng vai; tư thế nền chỉ lấy từ khung ổn định, đủ tin cậy
@@ -33,8 +37,11 @@ REASON_SHORT = (
 # Nhãn cũ trong file gán nhãn → tên hiện tại
 LABEL_ALIASES = {"Ngủ gục": "Gục xuống bàn"}
 
-ACTIVITY_BEHAVIORS = frozenset({"Giơ tay", "Viết bài", "Quay đầu"})
+# ERNU: B1/B2 là tín hiệu có thể thành E tùy ngữ cảnh A; B3 quay đầu → luôn N (không xếp "activity").
+ACTIVITY_BEHAVIORS = frozenset({"Giơ tay", "Viết bài"})
 REVIEW_BEHAVIORS = frozenset({"Cúi đầu lâu", "Gục xuống bàn"})
+# Quay đầu: tín hiệu trung tính theo ma trận ERNU (→ N); giữ riêng để báo cáo thô.
+NEUTRAL_BEHAVIORS = frozenset({"Quay đầu"})
 POSTURE_BEHAVIORS = frozenset({"Nghiêng người"})
 UNKNOWN_BEHAVIOR = "Không xác định"
 ALWAYS_ON = frozenset({UNKNOWN_BEHAVIOR})
@@ -61,7 +68,10 @@ def reason_name(reason: str) -> str | None:
 
 
 def observation_group(reasons: list[str]) -> str:
-    """activity | review | posture | unknown | clear."""
+    """activity | review | posture | unknown | clear | neutral.
+
+    Nhóm legacy cho khung video; diễn giải E/R/N/U nằm ở core.ernu theo cửa sổ + A1–A5.
+    """
     names = {reason_name(r) for r in reasons}
     names.discard(None)
     if names & REVIEW_BEHAVIORS or names & _LEGACY_REVIEW:
@@ -70,6 +80,8 @@ def observation_group(reasons: list[str]) -> str:
         return "unknown"
     if names & ACTIVITY_BEHAVIORS or "Nói chuyện" in names:
         return "activity"
+    if names & NEUTRAL_BEHAVIORS:
+        return "neutral"
     if names & POSTURE_BEHAVIORS:
         return "posture"
     return "clear"
@@ -83,6 +95,8 @@ def behavior_kind(name: str) -> str:
         return "Không xác định"
     if name in ACTIVITY_BEHAVIORS or name == "Nói chuyện":
         return "Hoạt động quan sát được"
+    if name in NEUTRAL_BEHAVIORS:
+        return "Tín hiệu trung tính (ERNU→N)"
     if name in POSTURE_BEHAVIORS:
         return "Tư thế ghi nhận"
     return "Khác"
@@ -93,6 +107,8 @@ def _group_of(name: str) -> str:
         return "activity"
     if name in REVIEW_BEHAVIORS or name in _LEGACY_REVIEW:
         return "review"
+    if name in NEUTRAL_BEHAVIORS:
+        return "neutral"
     if name in POSTURE_BEHAVIORS:
         return "posture"
     if name == UNKNOWN_BEHAVIOR:

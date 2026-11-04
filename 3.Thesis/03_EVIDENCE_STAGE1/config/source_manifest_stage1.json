@@ -1,0 +1,73 @@
+{
+  "created_at": "2026-10-31T15:41:21.696085",
+  "files": {
+    "core/__init__.py": {
+      "sha256": "07f49a3c7e8daa30eb673b1c11fc86aa06e449b51ef67f6ef169abf917c87578",
+      "bytes": 82
+    },
+    "core/analysis.py": {
+      "sha256": "3925083860b5f54065d96ea2009a3182f9d0ec45476d997e5915d9bc146f7c58",
+      "bytes": 8949
+    },
+    "core/behavior.py": {
+      "sha256": "e3030139bb5c2a433140ca985695379c29016b39afb1cbdceddbb8bba3ecebfe",
+      "bytes": 24299
+    },
+    "core/behavior_log.py": {
+      "sha256": "f7f41647258d653f7f31c98aa3929b4997f55505aba74c6c4f7526e0da020ebb",
+      "bytes": 38483
+    },
+    "core/camera_hub.py": {
+      "sha256": "ab250e6777f3c259b1a7fe5c0dc5cf78a13be975f02fb26b66b59bc9c93bfc4e",
+      "bytes": 10646
+    },
+    "core/camera_registry.py": {
+      "sha256": "d0cf768f394a13993a73bb46b129c1d93415a80b6df78575c4d274222883ca77",
+      "bytes": 8525
+    },
+    "core/chat_detector.py": {
+      "sha256": "c6afdf3b52cc51006bcc8a4b968b3f6c9fc8b90170992e229373f6b714c909d8",
+      "bytes": 3568
+    },
+    "core/config.py": {
+      "sha256": "6353102cd1ae71b9eff4eebfe1d30e8e7b08c3f70d9e902e9936f5dddead849d",
+      "bytes": 7242
+    },
+    "core/eye_detector.py": {
+      "sha256": "715d53ebfbb056d2a56b9decd04e1530c90d61c021c4731375efc126c2b2eb5c",
+      "bytes": 3206
+    },
+    "core/face_augment.py": {
+      "sha256": "42be9b1dde67956b7e94b74e1b51af0da488e137cc23a7b4055259142d576377",
+      "bytes": 3420
+    },
+    "core/face_gallery.py": {
+      "sha256": "b61b0349e51c08eb041c40cc2256c27b468dca9d937bb3253ca7c6f78eac61e3",
+      "bytes": 19631
+    },
+    "core/identity.py": {
+      "sha256": "fb3a200ce95bbea33099276612af3ddd4a4695f3a6ae4b4ee379e7e35941b2f1",
+      "bytes": 26520
+    },
+    "core/keypoint_log.py": {
+      "sha256": "df934f9b605ea357417bcc344c4428b714406b20438cc23977ecb2d15f9356f8",
+      "bytes": 3287
+    },
+    "core/pose_estimator.py": {
+      "sha256": "19ec557032cf0353ff6f8595c62c26aa785c9d79d92c984bdec8e7b641175396",
+      "bytes": 2679
+    },
+    "core/video_clock.py": {
+      "sha256": "b5535fb0704829bf1fcc1b3e7c9b36d6e550d72454c5b6290076020da75d171a",
+      "bytes": 7325
+    },
+    "core/video_source.py": {
+      "sha256": "412ab10a4c809a6be18990d60e08e78cb779b1746b3e2ef41a80e69d453eec39",
+      "bytes": 3778
+    },
+    "core/visualizer.py": {
+      "sha256": "27850a5cbebe582e97e9598ef54627fcc4d67c0be657b02161d7bc410317519b",
+      "bytes": 3842
+    }
+  }
+}

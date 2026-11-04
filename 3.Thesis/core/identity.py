@@ -23,13 +23,17 @@ MAX_REVERIFY_PER_ROUND = 4  # số track đã khóa được kiểm tra lại / 
 RECOG_BANDS = 3  # chia khung: trên (cuối lớp) / giữa / dưới (gần cam)
 MIN_BOX_W = 22
 MIN_BOX_H = 36
-STICKY_TTL = 120  # giữ tên ~N lần cập nhật track sau khi track ID đổi / mất tạm
-STICKY_IOU = 0.20  # IoU tối thiểu để gắn lại tên vào box mới cùng chỗ
+STICKY_TTL = 120  # giữ ứng viên ~N lần cập nhật track sau khi track ID đổi / mất tạm
+STICKY_IOU = 0.20  # IoU tối thiểu để đề cử cùng vị trí (chưa khóa danh tính)
 # Ngưỡng khóa cứng nằm trong FaceRecognizer (hard_lock_sim / hard_lock_margin, chỉnh trên giao diện)
-HARD_STICKY_TTL = 900  # giữ mã HS khóa cứng khi mất tạm (~15 phút ở ~1 lần cập nhật/giây)
+# TTL tính theo số lần cập nhật track, không phải giây tường — chỉ ~15 phút nếu ~1 cập nhật/giây.
+HARD_STICKY_TTL = 900
 HARD_RECOG_EVERY = 24  # khóa cứng: kiểm tra lại thưa hơn nữa
 # Track đang giữ mã không thấy trong N lần cập nhật → coi như vắng, track mới được nhận lại mã
 OWNER_ABSENT_UPDATES = 3
+# Không chuyển khóa danh tính chỉ vì IoU chồng lấp; cần ArcFace xác minh lại.
+# id_pending lưu (sid, name, sim, old_tid) để ưu tiên nhận diện lại.
+IOU_TRANSFER_LOCK = False
 # OSD camera (EZVIZ…): góc trên thường là logo/timestamp — không phải người
 OSD_TOP_FRAC = 0.18
 OSD_SIDE_FRAC = 0.28
@@ -200,7 +204,10 @@ class IdentityTracker:
             self.id_last_box: dict[int, tuple[int, int, int, int]] = {}
             self.id_last_seen: dict[int, int] = {}
             self.id_head_pose: dict[int, tuple[float, float, int]] = {}
+            # track mới cùng chỗ → ứng viên danh tính chờ ArcFace xác minh
+            self.id_pending: dict[int, tuple[str, str, float, int]] = {}
             self.sid_owner: dict[str, int] = {}
+            self.face_match_events: dict[int, int] = {}  # tid → số lần ArcFace khớp hợp lệ
             self.frame_i = 0
             self.recog_i = 0
 
@@ -216,6 +223,7 @@ class IdentityTracker:
         self.id_last_pct.pop(tid, None)
         self.id_noface.pop(tid, None)
         self.id_has_face.discard(tid)
+        self.id_pending.pop(tid, None)
         if sid_old and self.sid_owner.get(sid_old) == tid:
             self.sid_owner.pop(sid_old, None)
 
@@ -294,7 +302,23 @@ class IdentityTracker:
         """Ghim / nâng cấp theo %: track đã có mã chỉ đổi sang HS khác khi % cao hơn."""
         if sid is None or name is None or not self.rec.is_compatible(sim):
             return
+        self.face_match_events[tid] = self.face_match_events.get(tid, 0) + 1
         hard = self._is_hard(sim, margin)
+        pending = self.id_pending.get(tid)
+        if pending is not None and pending[0] == sid:
+            # ArcFace xác minh ứng viên IoU → chuyển khóa từ track cũ
+            old_tid = pending[3]
+            self.id_pending.pop(tid, None)
+            if old_tid in self.id_locked and self.id_student.get(old_tid) == sid:
+                self._transfer_lock(old_tid, tid)
+                if sim > float(self.id_best_sim.get(tid, 0.0)):
+                    self.id_best_sim[tid] = sim
+                self.id_last_pct[tid] = sim_to_pct(sim)
+                self.id_has_face.add(tid)
+                self.id_noface[tid] = 0
+                if hard:
+                    self.id_hard.add(tid)
+                return
         if tid in self.id_locked:
             pinned = float(self.id_best_sim.get(tid, 0.0))
             cur = self.id_student.get(tid)
@@ -304,6 +328,7 @@ class IdentityTracker:
                     self.id_last_pct[tid] = sim_to_pct(sim)
                 if hard:
                     self.id_hard.add(tid)
+                self.id_pending.pop(tid, None)
                 return
             if sim <= pinned:
                 return
@@ -319,6 +344,7 @@ class IdentityTracker:
                 self.id_last_pct[tid] = sim_to_pct(sim)
                 self.id_has_face.add(tid)
                 self.id_noface[tid] = 0
+                self.id_pending.pop(tid, None)
                 return
             if sim <= owner_best:
                 return
@@ -329,6 +355,7 @@ class IdentityTracker:
                 self.id_names.pop(owner, None)
                 self.id_student.pop(owner, None)
                 self.sid_owner.pop(sid, None)
+        self.id_pending.pop(tid, None)
         self._pin_identity(tid, sid, name, sim, hard)
 
     # ---------- luồng phân tích (nhanh) ----------
@@ -372,13 +399,29 @@ class IdentityTracker:
                 for ntid, x1, y1, x2, y2 in parsed:
                     if ntid in self.id_locked or ntid in taken_new:
                         continue
+                    if ntid in self.id_pending:
+                        continue
                     ov = box_iou(obox, (x1, y1, x2, y2))
                     if ov > best_iou:
                         best_iou = ov
                         best_tid = ntid
-                if best_tid is not None:
+                if best_tid is None:
+                    continue
+                taken_new.add(best_tid)
+                if IOU_TRANSFER_LOCK:
+                    # Bản cũ: chuyển khóa ngay theo IoU (dễ tráo tên khi đổi chỗ).
                     self._transfer_lock(otid, best_tid)
-                    taken_new.add(best_tid)
+                else:
+                    # An toàn: chỉ đề cử cùng vị trí; khóa khi ArcFace xác minh lại.
+                    sid = self.id_student.get(otid)
+                    name = self.id_names.get(otid)
+                    if sid and name:
+                        self.id_pending[best_tid] = (
+                            sid, name, float(self.id_best_sim.get(otid, 0.0)), otid,
+                        )
+            # Xóa pending của track không còn xuất hiện
+            for ptid in [t for t in self.id_pending if t not in present]:
+                self.id_pending.pop(ptid, None)
             for tid in [t for t, p in self.id_head_pose.items() if frame_i - p[2] > HEAD_POSE_KEEP]:
                 del self.id_head_pose[tid]
             return parsed
@@ -401,6 +444,7 @@ class IdentityTracker:
             pct = self.id_last_pct.get(tid)
             if pct is None and tid in self.id_best_sim:
                 pct = sim_to_pct(self.id_best_sim[tid])
+            pending = self.id_pending.get(tid)
             no_face_suspect = (
                 tid not in self.id_locked
                 and tid not in self.id_has_face
@@ -413,6 +457,8 @@ class IdentityTracker:
                 "match_pct": round(pct, 1) if pct is not None else None,
                 "hard_locked": known and tid in self.id_hard,
                 "no_face_suspect": no_face_suspect,
+                "pending_student_id": pending[0] if pending else None,
+                "face_match_events": int(self.face_match_events.get(tid, 0)),
             }
 
     def identified_count(self) -> int:
@@ -453,16 +499,28 @@ class IdentityTracker:
             reverify_candidates.sort(
                 key=lambda t: (self.id_last_recog.get(t[0], -10**9), t[5])
             )
-            unnamed = [t for t in recog_candidates if t[0] not in self.id_student]
-            named_unlocked = [t for t in recog_candidates if t[0] in self.id_student]
+            # Ưu tiên track đang chờ xác minh sau khi ByteTrack đổi ID
+            pending_first = [
+                t for t in recog_candidates if t[0] in self.id_pending
+            ]
+            pending_ids = {t[0] for t in pending_first}
+            unnamed = [
+                t for t in recog_candidates
+                if t[0] not in self.id_student and t[0] not in pending_ids
+            ]
+            named_unlocked = [
+                t for t in recog_candidates
+                if t[0] in self.id_student and t[0] not in pending_ids
+            ]
+            remain_after_pending = max(0, MAX_RECOG_PER_ROUND - len(pending_first))
             fair_unnamed = _pick_fair_recog(
-                unnamed, MAX_RECOG_PER_ROUND, height, self.id_last_recog
+                unnamed, remain_after_pending, height, self.id_last_recog
             )
-            remain = max(0, MAX_RECOG_PER_ROUND - len(fair_unnamed))
+            remain = max(0, remain_after_pending - len(fair_unnamed))
             fair_rest = _pick_fair_recog(
                 named_unlocked, remain, height, self.id_last_recog
             )
-            to_recog = [t[:5] for t in fair_unnamed + fair_rest]
+            to_recog = [t[:5] for t in pending_first + fair_unnamed + fair_rest]
             to_reverify = [t[:5] for t in reverify_candidates[:MAX_REVERIFY_PER_ROUND]]
 
         if recog_i % FACE_SWEEP_EVERY == 0:

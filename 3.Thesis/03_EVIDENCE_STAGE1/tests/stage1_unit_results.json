@@ -1,0 +1,420 @@
+{
+  "created_at": "2026-11-04T13:01:44.228940",
+  "passed": 68,
+  "failed": 0,
+  "total": 68,
+  "present_min_frames": 3,
+  "present_min_face_matches": 3,
+  "attendance_mode_default": "identity_observations",
+  "iou_transfer_lock": false,
+  "cases": [
+    {
+      "name": "AF01_ambiguous_reject",
+      "pass": true,
+      "detail": "best=0.460 margin=0.001 phải từ chối",
+      "suite": "arcface_margin"
+    },
+    {
+      "name": "AF02_lock_sim_accept",
+      "pass": true,
+      "detail": "best >= lock_sim chấp nhận dù margin nhỏ",
+      "suite": "arcface_margin"
+    },
+    {
+      "name": "AF03_margin_accept",
+      "pass": true,
+      "detail": "margin >= min_margin chấp nhận",
+      "suite": "arcface_margin"
+    },
+    {
+      "name": "AF04_single_gallery",
+      "pass": true,
+      "detail": "gallery 1 HS: chỉ cần tương thích",
+      "suite": "arcface_margin"
+    },
+    {
+      "name": "AF05_below_threshold",
+      "pass": true,
+      "detail": "dưới ngưỡng từ chối",
+      "suite": "arcface_margin"
+    },
+    {
+      "name": "AF06_old_near_ok_would_accept",
+      "pass": true,
+      "detail": "minh chứng quy tắc cũ chấp nhận trường hợp mơ hồ",
+      "suite": "arcface_margin"
+    },
+    {
+      "name": "ID01_iou_transfer_disabled",
+      "pass": true,
+      "detail": "không chuyển khóa chỉ vì IoU",
+      "suite": "identity_iou"
+    },
+    {
+      "name": "ID02_new_track_present",
+      "pass": true,
+      "detail": "track mới được giữ",
+      "suite": "identity_iou"
+    },
+    {
+      "name": "ID03_pending_not_locked",
+      "pass": true,
+      "detail": "pending=('HS08', 'Hoc Sinh 08', 0.6, 10) locked_27=False",
+      "suite": "identity_iou"
+    },
+    {
+      "name": "ID04_orphan_kept_until_verify",
+      "pass": true,
+      "detail": "track cũ giữ khóa đến khi ArcFace xác minh / hết TTL",
+      "suite": "identity_iou"
+    },
+    {
+      "name": "ID05_arcface_confirms_transfer",
+      "pass": true,
+      "detail": "locked_27=True owner=27 orphan_cleared=True",
+      "suite": "identity_iou"
+    },
+    {
+      "name": "ID06_seat_swap_no_hs08",
+      "pass": true,
+      "detail": "sau ArcFace track mới là HS09, không giữ HS08 từ IoU",
+      "suite": "identity_iou"
+    },
+    {
+      "name": "E01_present",
+      "pass": true,
+      "detail": "present={'HS01'}",
+      "suite": "behavior_log_E01_E06"
+    },
+    {
+      "name": "E02_absent",
+      "pass": true,
+      "detail": "HS03 vắng",
+      "suite": "behavior_log_E01_E06"
+    },
+    {
+      "name": "E03_no_false_id",
+      "pass": true,
+      "detail": "present=[]",
+      "suite": "behavior_log_E01_E06"
+    },
+    {
+      "name": "E04_no_duplicate",
+      "pass": true,
+      "detail": "count HS01=1",
+      "suite": "behavior_log_E01_E06"
+    },
+    {
+      "name": "E05_single_episode",
+      "pass": true,
+      "detail": "episodes=1 starts=[0]",
+      "suite": "behavior_log_E01_E06"
+    },
+    {
+      "name": "E06_gap_splits_episode",
+      "pass": true,
+      "detail": "n=2 durs=[1.0, 0.0]",
+      "suite": "behavior_log_E01_E06"
+    },
+    {
+      "name": "E07_episode_sid_split",
+      "pass": true,
+      "detail": "by_sid={'HS01': ['Viết bài'], 'HS02': ['Giơ tay']}",
+      "suite": "behavior_log_E01_E06"
+    },
+    {
+      "name": "E08_strict_face_match_absent",
+      "pass": true,
+      "detail": "1 face_match_event không đủ PRESENT_MIN_FACE_MATCHES=3",
+      "suite": "behavior_log_E01_E06"
+    },
+    {
+      "name": "E09_strict_face_match_present",
+      "pass": true,
+      "detail": "≥3 face_match_events → có mặt",
+      "suite": "behavior_log_E01_E06"
+    },
+    {
+      "name": "E10_default_mode",
+      "pass": true,
+      "detail": "mode=identity_observations",
+      "suite": "behavior_log_E01_E06"
+    },
+    {
+      "name": "T01_fps_eff_floor",
+      "pass": true,
+      "detail": "fps_eff=1.0",
+      "suite": "timing"
+    },
+    {
+      "name": "T02_every_frame",
+      "pass": true,
+      "detail": "fps_eff=25.0",
+      "suite": "timing"
+    },
+    {
+      "name": "T03_skip_5",
+      "pass": true,
+      "detail": "fps_eff=5.0",
+      "suite": "timing"
+    },
+    {
+      "name": "T04_no_backdate_start",
+      "pass": true,
+      "detail": "start=250 (không nội suy 5.2s ngược)",
+      "suite": "timing"
+    },
+    {
+      "name": "T05_video_duration",
+      "pass": true,
+      "detail": "dur=0.8s từ khung 250→270 (thời gian video)",
+      "suite": "timing"
+    },
+    {
+      "name": "KP01_unknown_label",
+      "pass": true,
+      "detail": "Không xác định",
+      "suite": "missing_keypoint"
+    },
+    {
+      "name": "KP02_decay_on_missing",
+      "pass": true,
+      "detail": "analysis.py gọi decay và gắn no_keypoints",
+      "suite": "missing_keypoint"
+    },
+    {
+      "name": "KP03_unknown_group",
+      "pass": true,
+      "detail": "Nhóm quan sát = unknown",
+      "suite": "missing_keypoint"
+    },
+    {
+      "name": "ER01_B1_A1_E",
+      "pass": true,
+      "detail": "E",
+      "suite": "ernu"
+    },
+    {
+      "name": "ER02_B2_A2_E",
+      "pass": true,
+      "detail": "E",
+      "suite": "ernu"
+    },
+    {
+      "name": "ER03_B2_A1_N",
+      "pass": true,
+      "detail": "N",
+      "suite": "ernu"
+    },
+    {
+      "name": "ER04_B3_always_N",
+      "pass": true,
+      "detail": "N",
+      "suite": "ernu"
+    },
+    {
+      "name": "ER05_B4_A1_R",
+      "pass": true,
+      "detail": "R",
+      "suite": "ernu"
+    },
+    {
+      "name": "ER06_B4_A2_N",
+      "pass": true,
+      "detail": "N",
+      "suite": "ernu"
+    },
+    {
+      "name": "ER07_B5_A3_R",
+      "pass": true,
+      "detail": "R",
+      "suite": "ernu"
+    },
+    {
+      "name": "ER08_quay_dau_not_activity",
+      "pass": true,
+      "detail": "activity=frozenset({'Viết bài', 'Giơ tay'})",
+      "suite": "ernu"
+    },
+    {
+      "name": "ER09_quay_dau_group_neutral",
+      "pass": true,
+      "detail": "neutral",
+      "suite": "ernu"
+    },
+    {
+      "name": "ER10_cmin_to_U",
+      "pass": true,
+      "detail": "U cov=0.2",
+      "suite": "ernu"
+    },
+    {
+      "name": "ER11_B2_B4_A2_E",
+      "pass": true,
+      "detail": "E mixed=False evidence ['B2'] in A2",
+      "suite": "ernu"
+    },
+    {
+      "name": "ER12_tvalid0_status",
+      "pass": true,
+      "detail": "status=Chưa đủ dữ liệu P_E=None",
+      "suite": "ernu"
+    },
+    {
+      "name": "ER13_ex5_TE",
+      "pass": true,
+      "detail": "T_E=180.0",
+      "suite": "ernu"
+    },
+    {
+      "name": "ER14_ex5_TR",
+      "pass": true,
+      "detail": "T_R=50.0",
+      "suite": "ernu"
+    },
+    {
+      "name": "ER15_ex5_TN",
+      "pass": true,
+      "detail": "T_N=40.0",
+      "suite": "ernu"
+    },
+    {
+      "name": "ER16_ex5_TU",
+      "pass": true,
+      "detail": "T_U=30.0",
+      "suite": "ernu"
+    },
+    {
+      "name": "ER17_ex5_C",
+      "pass": true,
+      "detail": "C=90.0",
+      "suite": "ernu"
+    },
+    {
+      "name": "ER18_ex5_PE",
+      "pass": true,
+      "detail": "P_E=66.7",
+      "suite": "ernu"
+    },
+    {
+      "name": "ER19_ex5_PR",
+      "pass": true,
+      "detail": "P_R=18.5",
+      "suite": "ernu"
+    },
+    {
+      "name": "ER20_ex5_PN",
+      "pass": true,
+      "detail": "P_N=14.8",
+      "suite": "ernu"
+    },
+    {
+      "name": "ER21_ex5_PU",
+      "pass": true,
+      "detail": "P_U=10.0",
+      "suite": "ernu"
+    },
+    {
+      "name": "ER22_ex5_BEEI",
+      "pass": true,
+      "detail": "BEEI=74.1",
+      "suite": "ernu"
+    },
+    {
+      "name": "ER22b_ex5_publishable",
+      "pass": true,
+      "detail": "pub=True C=90.0",
+      "suite": "ernu"
+    },
+    {
+      "name": "ER22c_ex5_interp",
+      "pass": true,
+      "detail": "Trong phiên khoảng 5.0 phút (T=300s), dữ liệu quan sát hợp lệ chiếm 90.0% thời l",
+      "suite": "ernu"
+    },
+    {
+      "name": "ER26_ex10_C",
+      "pass": true,
+      "detail": "C=91.7",
+      "suite": "ernu"
+    },
+    {
+      "name": "ER27_ex10_PE",
+      "pass": true,
+      "detail": "P_E=63.6",
+      "suite": "ernu"
+    },
+    {
+      "name": "ER28_ex10_PR",
+      "pass": true,
+      "detail": "P_R=14.5",
+      "suite": "ernu"
+    },
+    {
+      "name": "ER29_ex10_PN",
+      "pass": true,
+      "detail": "P_N=21.8",
+      "suite": "ernu"
+    },
+    {
+      "name": "ER30_ex10_PU",
+      "pass": true,
+      "detail": "P_U=8.3",
+      "suite": "ernu"
+    },
+    {
+      "name": "ER31_beei_wN0",
+      "pass": true,
+      "detail": 70.0,
+      "suite": "ernu"
+    },
+    {
+      "name": "ER32_beei_wN05",
+      "pass": true,
+      "detail": 75.0,
+      "suite": "ernu"
+    },
+    {
+      "name": "ER33_beei_wN1",
+      "pass": true,
+      "detail": 80.0,
+      "suite": "ernu"
+    },
+    {
+      "name": "ER34_B1_short_N",
+      "pass": true,
+      "detail": "N []",
+      "suite": "ernu"
+    },
+    {
+      "name": "ER23_default_A1",
+      "pass": true,
+      "detail": "['A1', 'A1']",
+      "suite": "ernu"
+    },
+    {
+      "name": "ER24_sitting_N",
+      "pass": true,
+      "detail": "['N', 'N']",
+      "suite": "ernu"
+    },
+    {
+      "name": "ER25_class_enough",
+      "pass": true,
+      "detail": "Đủ dữ liệu",
+      "suite": "ernu"
+    },
+    {
+      "name": "ER35_split_at_A",
+      "pass": true,
+      "detail": "[(0, 10, 'A1', 'N'), (10, 15, 'A1', 'N'), (15, 20, 'A2', 'E'), (20, 30, 'A2', 'E')]",
+      "suite": "ernu"
+    },
+    {
+      "name": "ER36_unconfirmed_no_E",
+      "pass": true,
+      "detail": "N act=CHUA_XAC_MINH",
+      "suite": "ernu"
+    }
+  ]
+}
