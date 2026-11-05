@@ -1,7 +1,9 @@
 """Lớp diễn giải ERNU: B1–B5 + ngữ cảnh A1–A5 → nhãn cửa sổ E/R/N/U và chỉ số phiên.
 
-Tách khỏi detector hành vi thô. Không đồng nhất tư thế quan sát với mức tập trung nhận thức.
-Chỉ số BEEI (nếu dùng) chỉ là chỉ báo phụ cho dashboard/nghiên cứu.
+Chế độ tự động (mặc định): không cần nhập thủ công A1–A5 hay xác nhận OFF.
+  - Proxy: E→ON, R→OFF, N→UNCERTAIN, U→NO_DATA
+  - Hết phiên: mỗi HS có focus_verdict ∈ {Tập trung, Không tập trung, Chưa đủ dữ liệu}
+  - Viết bài (B2) được tính E ở mọi ngữ cảnh để chạy không cần bảng ACTIVITY_CONTEXT
 """
 
 from __future__ import annotations
@@ -21,22 +23,32 @@ BEHAVIOR_TO_B = {
 B_TO_NAME = {v: k for k, v in BEHAVIOR_TO_B.items()}
 UNKNOWN_SIGNAL = "MISSING"  # thiếu quan sát / không xác định
 
-# Ma trận diễn giải: behavior_code × activity → E | R | N | U
-# B1→E*; B2→E chỉ A2 còn lại N*; B3→N; B4→R* ở A1/A4 còn lại N; B5→R*; ngồi→N; thiếu→U
-_MATRIX: dict[str, dict[str, str]] = {
+# Ma trận mặc định (chế độ tự động: B2→E mọi A; B4 cúi đầu lâu → N, không tính không tập trung)
+DEFAULT_MATRIX: dict[str, dict[str, str]] = {
     "B1": {a: "E" for a in ("A1", "A2", "A3", "A4", "A5")},
-    "B2": {"A1": "N", "A2": "E", "A3": "N", "A4": "N", "A5": "N"},
+    "B2": {a: "E" for a in ("A1", "A2", "A3", "A4", "A5")},
     "B3": {a: "N" for a in ("A1", "A2", "A3", "A4", "A5")},
-    "B4": {"A1": "R", "A2": "N", "A3": "N", "A4": "R", "A5": "N"},
+    "B4": {a: "N" for a in ("A1", "A2", "A3", "A4", "A5")},
     "B5": {a: "R" for a in ("A1", "A2", "A3", "A4", "A5")},
     "NORMAL": {a: "N" for a in ("A1", "A2", "A3", "A4", "A5")},
     UNKNOWN_SIGNAL: {a: "U" for a in ("A1", "A2", "A3", "A4", "A5")},
+}
+# Giữ tên cũ cho tương thích import trong test/code cũ
+_MATRIX = DEFAULT_MATRIX
+
+# Tự động: R → OFF (không cần giáo viên xác nhận)
+DEFAULT_PROXY_MAPPING: dict[str, str] = {
+    "E": "ON",
+    "R": "OFF",
+    "N": "UNCERTAIN",
+    "U": "NO_DATA",
 }
 
 VALID_ACTIVITIES = frozenset({"A1", "A2", "A3", "A4", "A5"})
 # Nhiệm vụ chưa xác nhận: không gán E* (N an toàn); vẫn cho phép R rõ (B5) và U
 UNCONFIRMED_ACTIVITY = "CHUA_XAC_MINH"
 LABELS = ("E", "R", "N", "U")
+PROXY_LABELS = ("ON", "OFF", "PENDING", "UNCERTAIN", "NO_DATA")
 
 
 @dataclass
@@ -50,7 +62,7 @@ class BehaviorInterval:
 
     @property
     def b_code(self) -> str:
-        if self.behavior in _MATRIX:
+        if self.behavior in DEFAULT_MATRIX:
             return self.behavior
         return BEHAVIOR_TO_B.get(self.behavior, self.behavior)
 
@@ -75,6 +87,12 @@ class WindowLabel:
     reason: str
     mixed: bool
     rules_version: str
+    proxy_label: str = ""  # ON | OFF | PENDING | UNCERTAIN | NO_DATA
+    confirmed_off: bool = False  # True khi giáo viên xác nhận R → OFF
+
+    def __post_init__(self) -> None:
+        if not self.proxy_label:
+            self.proxy_label = proxy_from_label(self.pred_label, self.confirmed_off)
 
 
 @dataclass
@@ -85,22 +103,97 @@ class StudentMetrics:
     T_R: float = 0.0
     T_N: float = 0.0
     T_U: float = 0.0
+    T_ON: float = 0.0
+    T_OFF: float = 0.0
+    T_PENDING: float = 0.0
+    T_UNCERTAIN: float = 0.0
+    T_NO_DATA: float = 0.0
     C: float | None = None
     P_E: float | None = None
     P_R: float | None = None
     P_N: float | None = None
     P_U: float | None = None
+    P_ON: float | None = None
+    P_OFF: float | None = None
+    P_PENDING: float | None = None
+    P_UNCERTAIN: float | None = None
+    P_NO_DATA: float | None = None
     data_status: str = "Chưa đủ dữ liệu"
     publishable: bool = False  # True khi đủ T_valid và C ≥ publish_c_min
     BEEI: float | None = None
     BEEI_wN0: float | None = None
     BEEI_wN1: float | None = None
     interpretation: str = ""
+    focus_verdict: str = "Chưa đủ dữ liệu"  # Tập trung | Không tập trung | Chưa đủ dữ liệu
+    focus_score: float | None = None  # 0–100, dựa trên BEEI / tỷ lệ ON–OFF
     windows: list[WindowLabel] = field(default_factory=list)
 
     @property
     def T_valid(self) -> float:
         return self.T_E + self.T_R + self.T_N
+
+
+def proxy_from_label(
+    pred_label: str,
+    confirmed_off: bool = False,
+    mapping: dict[str, str] | None = None,
+) -> str:
+    """Ánh xạ E/R/N/U → proxy. Mặc định R→OFF (tự động)."""
+    lab = (pred_label or "").strip().upper()
+    m = mapping or DEFAULT_PROXY_MAPPING
+    # Tương thích API cũ: confirmed_off=False + mapping R=PENDING → giữ PENDING
+    if lab == "R" and confirmed_off:
+        return "OFF"
+    if lab == "R" and confirmed_off is False and m.get("R") == "PENDING":
+        return "PENDING"
+    return m.get(lab, "UNCERTAIN")
+
+
+def apply_review_confirmation(window: WindowLabel, confirmed_off: bool) -> WindowLabel:
+    """Tùy chọn: ghi đè proxy cửa sổ R (OFF hoặc PENDING). Không đổi pred_label."""
+    if window.pred_label != "R":
+        return window
+    window.confirmed_off = bool(confirmed_off)
+    window.proxy_label = "OFF" if confirmed_off else "PENDING"
+    return window
+
+
+def compute_focus_verdict(
+    *,
+    publishable: bool,
+    T_valid: float,
+    T_ON: float,
+    T_OFF: float,
+    BEEI: float | None,
+    focus_threshold: float = 50.0,
+) -> tuple[str, float | None]:
+    """Kết luận hết phiên: Tập trung / Không tập trung / Chưa đủ dữ liệu.
+
+    Điểm = BEEI nếu có; không thì 100 * T_ON / (T_ON + T_OFF) (bỏ UNCERTAIN).
+    >= focus_threshold → Tập trung; ngược lại → Không tập trung.
+    """
+    if not publishable or T_valid <= 0:
+        return "Chưa đủ dữ liệu", None
+    if BEEI is not None:
+        score = float(BEEI)
+    else:
+        denom = T_ON + T_OFF
+        score = round(100.0 * T_ON / denom, 1) if denom > 0 else 50.0
+    if score >= focus_threshold:
+        return "Tập trung", score
+    return "Không tập trung", score
+
+
+def get_matrix(cfg: ErnuConfig | None = None) -> dict[str, dict[str, str]]:
+    if cfg is not None and getattr(cfg, "matrix", None):
+        return cfg.matrix
+    return DEFAULT_MATRIX
+
+
+def get_proxy_mapping(cfg: ErnuConfig | None = None) -> dict[str, str]:
+    if cfg is not None and getattr(cfg, "proxy_mapping", None):
+        return cfg.proxy_mapping
+    return dict(DEFAULT_PROXY_MAPPING)
 
 
 def normalize_activity(code: str | None, default: str = "A1") -> str:
@@ -112,7 +205,11 @@ def normalize_activity(code: str | None, default: str = "A1") -> str:
     return default if default in VALID_ACTIVITIES else "A1"
 
 
-def matrix_label(behavior_code: str, activity_code: str) -> str:
+def matrix_label(
+    behavior_code: str,
+    activity_code: str,
+    matrix: dict[str, dict[str, str]] | None = None,
+) -> str:
     """Tra cứu một ô ma trận; hành vi lạ → N.
 
     Khi activity = CHUA_XAC_MINH: không gán E (thiếu xác nhận nhiệm vụ);
@@ -125,7 +222,8 @@ def matrix_label(behavior_code: str, activity_code: str) -> str:
         if behavior_code == UNKNOWN_SIGNAL:
             return "U"
         return "N"
-    row = _MATRIX.get(behavior_code)
+    mat = matrix or DEFAULT_MATRIX
+    row = mat.get(behavior_code)
     if row is None:
         return "N"
     return row.get(act, "N")
@@ -246,6 +344,8 @@ def label_window(
     act = normalize_activity(activity_code, cfg.default_activity)
     obs = covered_sec(observation_spans, start_sec, end_sec)
     coverage = min(1.0, obs / win_len)
+    mat = get_matrix(cfg)
+    proxy_map = get_proxy_mapping(cfg)
 
     # Sự kiện hành vi chồng cửa sổ (bỏ MISSING khỏi evidence E/R)
     codes: list[str] = []
@@ -265,13 +365,13 @@ def label_window(
             if "MISSING" not in codes:
                 codes.append("MISSING")
             continue
-        if code not in _MATRIX and code not in BEHAVIOR_TO_B.values():
+        if code not in mat and code not in BEHAVIOR_TO_B.values():
             continue
         if not _event_meets_duration(ev, code, cfg):
             continue
         if code not in codes:
             codes.append(code)
-        lab = matrix_label(code, act)
+        lab = matrix_label(code, act, mat)
         if code == "B2" and lab == "E":
             writing_e = True
         if lab == "E":
@@ -329,6 +429,8 @@ def label_window(
         reason="; ".join(reason_parts),
         mixed=mixed,
         rules_version=cfg.rules_version,
+        proxy_label=proxy_from_label(label, False, proxy_map),
+        confirmed_off=False,
     )
 
 
@@ -374,7 +476,9 @@ def interpret_metrics(
         f"{P_N if P_N is not None else '—'}% chưa đủ bằng chứng kết luận (P_N). "
         f"Thiếu quan sát P_U={P_U if P_U is not None else '—'}% trên toàn phiên "
         f"(T_U={T_U:.0f}s). {pub} "
-        "Kết quả không phản ánh trực tiếp tỷ lệ tập trung nhận thức."
+        "Kết quả không phản ánh trực tiếp tỷ lệ tập trung nhận thức. "
+        "Proxy ON/PENDING/UNCERTAIN/NO_DATA chỉ diễn giải hành vi theo nhiệm vụ; "
+        "OFF chỉ khi được xác nhận xem lại."
     )
 
 
@@ -384,9 +488,12 @@ def metrics_from_windows(
     cfg: ErnuConfig,
 ) -> StudentMetrics:
     m = StudentMetrics(student_id=student_id, windows=windows)
+    T_seen = 0.0  # chỉ các cửa sổ có nhìn thấy HS (coverage > 0)
     for w in windows:
         dur = max(0.0, w.end_sec - w.start_sec)
         m.T += dur
+        if w.valid_coverage > 0:
+            T_seen += dur
         if w.pred_label == "E":
             m.T_E += dur
         elif w.pred_label == "R":
@@ -395,22 +502,43 @@ def metrics_from_windows(
             m.T_N += dur
         else:
             m.T_U += dur
+        px = w.proxy_label or proxy_from_label(w.pred_label, w.confirmed_off, get_proxy_mapping(cfg))
+        if px == "ON":
+            m.T_ON += dur
+        elif px == "OFF":
+            m.T_OFF += dur
+        elif px == "PENDING":
+            m.T_PENDING += dur
+        elif px == "NO_DATA":
+            m.T_NO_DATA += dur
+        else:
+            m.T_UNCERTAIN += dur
 
     m.T = round(m.T, 3)
     m.T_E = round(m.T_E, 3)
     m.T_R = round(m.T_R, 3)
     m.T_N = round(m.T_N, 3)
     m.T_U = round(m.T_U, 3)
+    m.T_ON = round(m.T_ON, 3)
+    m.T_OFF = round(m.T_OFF, 3)
+    m.T_PENDING = round(m.T_PENDING, 3)
+    m.T_UNCERTAIN = round(m.T_UNCERTAIN, 3)
+    m.T_NO_DATA = round(m.T_NO_DATA, 3)
 
     if m.T <= 0 or m.T_valid <= 0:
         m.data_status = "Chưa đủ dữ liệu"
         m.publishable = False
         m.C = round(100.0 * m.T_valid / m.T, 1) if m.T > 0 else None
         m.P_U = round(100.0 * m.T_U / m.T, 1) if m.T > 0 else None
+        m.P_NO_DATA = round(100.0 * m.T_NO_DATA / m.T, 1) if m.T > 0 else None
         m.interpretation = interpret_metrics(
             T=m.T, T_E=m.T_E, T_R=m.T_R, T_N=m.T_N, T_U=m.T_U,
             C=m.C, P_E=m.P_E, P_R=m.P_R, P_N=m.P_N, P_U=m.P_U,
             data_status=m.data_status, publishable=m.publishable,
+        )
+        m.focus_verdict, m.focus_score = compute_focus_verdict(
+            publishable=False, T_valid=0, T_ON=m.T_ON, T_OFF=m.T_OFF, BEEI=None,
+            focus_threshold=getattr(cfg, "focus_threshold", 50.0),
         )
         return m
 
@@ -420,6 +548,12 @@ def metrics_from_windows(
     m.P_R = round(100.0 * m.T_R / m.T_valid, 1)
     m.P_N = round(100.0 * m.T_N / m.T_valid, 1)
     m.P_U = round(100.0 * m.T_U / m.T, 1)
+    # Proxy ratios: ON/OFF/PENDING/UNCERTAIN trên T_valid; NO_DATA trên T
+    m.P_ON = round(100.0 * m.T_ON / m.T_valid, 1)
+    m.P_OFF = round(100.0 * m.T_OFF / m.T_valid, 1)
+    m.P_PENDING = round(100.0 * m.T_PENDING / m.T_valid, 1)
+    m.P_UNCERTAIN = round(100.0 * m.T_UNCERTAIN / m.T_valid, 1)
+    m.P_NO_DATA = round(100.0 * m.T_NO_DATA / m.T, 1)
     m.publishable = (m.C is not None and m.C >= cfg.publish_c_min * 100.0)
     m.BEEI = beei_score(m.T_E, m.T_R, m.T_N, cfg.beei_w_e, cfg.beei_w_r, cfg.beei_w_n)
     m.BEEI_wN0 = beei_score(m.T_E, m.T_R, m.T_N, cfg.beei_w_e, cfg.beei_w_r, 0.0)
@@ -429,11 +563,60 @@ def metrics_from_windows(
         C=m.C, P_E=m.P_E, P_R=m.P_R, P_N=m.P_N, P_U=m.P_U,
         data_status=m.data_status, publishable=m.publishable,
     )
+    # Kết luận tập trung: theo thời gian ĐÃ THẤY học sinh, không phạt đoạn video chưa xuất hiện.
+    # UI nhận diện ≠ coverage cả phiên; C_present = T_valid / T_seen.
+    C_present = round(100.0 * m.T_valid / T_seen, 1) if T_seen > 0 else None
+    focus_min = float(getattr(cfg, "focus_min_valid_sec", 20.0))
+    focus_ok = (
+        m.T_valid + 1e-9 >= focus_min
+        and C_present is not None
+        and C_present >= cfg.publish_c_min * 100.0
+    ) or bool(m.publishable)
+    m.focus_verdict, m.focus_score = compute_focus_verdict(
+        publishable=focus_ok,
+        T_valid=m.T_valid,
+        T_ON=m.T_ON,
+        T_OFF=m.T_OFF,
+        BEEI=m.BEEI,
+        focus_threshold=getattr(cfg, "focus_threshold", 50.0),
+    )
     return m
+
+
+def _proxy_fields_from_students(students: Iterable[StudentMetrics]) -> dict:
+    T_ON = T_OFF = T_PENDING = T_UNCERTAIN = T_NO_DATA = 0.0
+    T = T_valid = 0.0
+    for s in students:
+        T += s.T
+        T_valid += s.T_valid
+        T_ON += s.T_ON
+        T_OFF += s.T_OFF
+        T_PENDING += s.T_PENDING
+        T_UNCERTAIN += s.T_UNCERTAIN
+        T_NO_DATA += s.T_NO_DATA
+    out = {
+        "T_ON": round(T_ON, 3),
+        "T_OFF": round(T_OFF, 3),
+        "T_PENDING": round(T_PENDING, 3),
+        "T_UNCERTAIN": round(T_UNCERTAIN, 3),
+        "T_NO_DATA": round(T_NO_DATA, 3),
+        "P_ON": None,
+        "P_OFF": None,
+        "P_PENDING": None,
+        "P_UNCERTAIN": None,
+        "P_NO_DATA": round(100.0 * T_NO_DATA / T, 1) if T > 0 else None,
+    }
+    if T_valid > 0:
+        out["P_ON"] = round(100.0 * T_ON / T_valid, 1)
+        out["P_OFF"] = round(100.0 * T_OFF / T_valid, 1)
+        out["P_PENDING"] = round(100.0 * T_PENDING / T_valid, 1)
+        out["P_UNCERTAIN"] = round(100.0 * T_UNCERTAIN / T_valid, 1)
+    return out
 
 
 def aggregate_class_metrics(students: Iterable[StudentMetrics], cfg: ErnuConfig) -> dict:
     """Tổng hợp lớp theo giây (không theo số cửa sổ)."""
+    students = list(students)
     T = T_E = T_R = T_N = T_U = 0.0
     for s in students:
         T += s.T
@@ -442,6 +625,7 @@ def aggregate_class_metrics(students: Iterable[StudentMetrics], cfg: ErnuConfig)
         T_N += s.T_N
         T_U += s.T_U
     T_valid = T_E + T_R + T_N
+    proxy = _proxy_fields_from_students(students)
     out: dict = {
         "T": round(T, 3),
         "T_E": round(T_E, 3),
@@ -449,6 +633,7 @@ def aggregate_class_metrics(students: Iterable[StudentMetrics], cfg: ErnuConfig)
         "T_N": round(T_N, 3),
         "T_U": round(T_U, 3),
         "T_valid": round(T_valid, 3),
+        **proxy,
         "C": None,
         "P_E": None,
         "P_R": None,
@@ -460,6 +645,15 @@ def aggregate_class_metrics(students: Iterable[StudentMetrics], cfg: ErnuConfig)
         "BEEI_wN0": None,
         "BEEI_wN1": None,
         "interpretation": "",
+        "proxy_mapping": get_proxy_mapping(cfg),
+        "proxy_note": (
+            "Tự động: E→ON (tập trung), R→OFF (không tập trung), "
+            "N→UNCERTAIN, U→NO_DATA. Hết phiên: focus_verdict theo điểm ≥ ngưỡng."
+        ),
+        "focus_threshold": getattr(cfg, "focus_threshold", 50.0),
+        "n_tap_trung": sum(1 for s in students if s.focus_verdict == "Tập trung"),
+        "n_khong_tap_trung": sum(1 for s in students if s.focus_verdict == "Không tập trung"),
+        "n_chua_du_du_lieu": sum(1 for s in students if s.focus_verdict == "Chưa đủ dữ liệu"),
         "beei_weights": {
             "default": {"w_E": cfg.beei_w_e, "w_R": cfg.beei_w_r, "w_N": cfg.beei_w_n},
             "sensitivity_wN": [0.0, cfg.beei_w_n, 1.0],
@@ -506,8 +700,13 @@ def analyze_session(
     observations: list[ObservationInterval],
     activity_segments: list[dict] | None = None,
     cfg: ErnuConfig | None = None,
+    review_confirmations: list[dict] | None = None,
 ) -> tuple[list[WindowLabel], list[StudentMetrics], dict]:
-    """Chạy toàn bộ pipeline cửa sổ → metrics từng HS → tổng hợp lớp."""
+    """Chạy toàn bộ pipeline cửa sổ → metrics từng HS → tổng hợp lớp.
+
+    review_confirmations: [{student_id, start_sec, end_sec, confirmed_off}, ...]
+    khớp cửa sổ R theo chồng thời gian lớn nhất → apply_review_confirmation.
+    """
     cfg = cfg or ErnuConfig()
     bounds = build_window_bounds(
         duration_sec, cfg.window_sec, activity_segments, cfg.default_activity
@@ -537,4 +736,48 @@ def analyze_session(
             sw.append(w)
             all_windows.append(w)
         metrics.append(metrics_from_windows(sid, sw, cfg))
+
+    if review_confirmations:
+        apply_confirmations_to_session(all_windows, metrics, review_confirmations, cfg)
+
     return all_windows, metrics, aggregate_class_metrics(metrics, cfg)
+
+
+def apply_confirmations_to_session(
+    windows: list[WindowLabel],
+    metrics: list[StudentMetrics],
+    confirmations: list[dict],
+    cfg: ErnuConfig,
+) -> None:
+    """Áp xác nhận OFF lên cửa sổ R khớp nhất; tính lại metrics theo student."""
+    by_sid: dict[str, list[WindowLabel]] = {}
+    for w in windows:
+        by_sid.setdefault(w.student_id, []).append(w)
+
+    for conf in confirmations:
+        sid = str(conf.get("student_id") or "")
+        s = conf.get("start_sec")
+        e = conf.get("end_sec")
+        if not sid or s is None or e is None:
+            continue
+        try:
+            s_f, e_f = float(s), float(e)
+        except (TypeError, ValueError):
+            continue
+        confirmed_off = bool(conf.get("confirmed_off", True))
+        best = None
+        best_ov = 0.0
+        for w in by_sid.get(sid, []):
+            if w.pred_label != "R":
+                continue
+            ov = overlap_sec(s_f, e_f, w.start_sec, w.end_sec)
+            if ov > best_ov:
+                best_ov = ov
+                best = w
+        if best is not None and best_ov > 0:
+            apply_review_confirmation(best, confirmed_off)
+
+    # Tính lại metrics sau xác nhận
+    metrics.clear()
+    for sid, sw in by_sid.items():
+        metrics.append(metrics_from_windows(sid, sw, cfg))

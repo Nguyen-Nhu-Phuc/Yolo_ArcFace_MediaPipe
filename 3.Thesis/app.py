@@ -26,8 +26,8 @@ os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "3")
 
 import cv2
 import numpy as np
-from fastapi import FastAPI, File, HTTPException, Request, UploadFile, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile, WebSocket, WebSocketDisconnect
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from ultralytics import YOLO
 
 from core.analysis import FrameAnalyzer, effective_fps, fit_width, work_size
@@ -36,7 +36,15 @@ from core.camera_hub import CameraHub
 from core.camera_registry import CameraError, source_from_body
 from core.behavior_log import BehaviorRecorder
 from core.config import HIDDEN_BEHAVIORS, Config, load_config, save_behavior_settings
-from core.face_gallery import FaceRecognizer, display_code, load_student_classes, roster_names
+from core.face_gallery import (
+    FaceRecognizer,
+    display_code,
+    load_student_classes,
+    reset_display_codes,
+    roster_names,
+)
+from core.roster_import import import_student_rows, student_template_bytes
+from core.roster_store import RosterError, add_class, add_photos, add_student, delete_class, delete_reports, delete_student, first_photo_jpeg, list_classes, list_reports, list_students, overview, update_student
 from core.identity import IdentityTracker
 from core.keypoint_log import LOG_DIR as KEYPOINT_LOG_DIR
 from core.keypoint_log import KeypointLogger
@@ -412,6 +420,222 @@ async def index():
     return _read_template("index.html")
 
 
+@app.get("/admin")
+async def admin_page():
+    return _read_template("admin.html")
+
+
+def _roster_error(exc: RosterError) -> HTTPException:
+    return HTTPException(400, str(exc))
+
+
+async def _photo_blobs(files: list[UploadFile] | None) -> list[tuple[str, bytes]]:
+    blobs: list[tuple[str, bytes]] = []
+    for upload in files or []:
+        if not upload.filename:
+            continue
+        blobs.append((upload.filename, await upload.read()))
+        await upload.close()
+    return blobs
+
+
+@app.get("/api/admin/overview")
+async def admin_overview():
+    return await asyncio.to_thread(overview, REPORTS_DIR)
+
+
+@app.get("/api/admin/classes")
+async def admin_classes():
+    return {"classes": await asyncio.to_thread(list_classes)}
+
+
+@app.post("/api/admin/classes")
+async def admin_add_class(request: Request):
+    body = await request.json()
+    try:
+        row = await asyncio.to_thread(add_class, str(body.get("class_id") or ""), str(body.get("note") or ""))
+    except RosterError as exc:
+        raise _roster_error(exc) from exc
+    return row
+
+
+@app.delete("/api/admin/classes/{class_id}")
+async def admin_delete_class(class_id: str):
+    try:
+        await asyncio.to_thread(delete_class, class_id)
+    except RosterError as exc:
+        raise _roster_error(exc) from exc
+    return {"ok": True}
+
+
+@app.get("/api/admin/students")
+async def admin_students(class_id: str = ""):
+    return {"students": await asyncio.to_thread(list_students, class_id)}
+
+
+@app.get("/api/admin/students/template")
+async def admin_student_template(class_id: str = ""):
+    try:
+        data, filename = await asyncio.to_thread(student_template_bytes, class_id)
+    except RosterError as exc:
+        raise _roster_error(exc) from exc
+    return Response(
+        content=data,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@app.post("/api/admin/classes/{class_id}/students/import")
+async def admin_import_students(class_id: str, file: UploadFile = File(...)):
+    raw = await file.read()
+    await file.close()
+    try:
+        result = await asyncio.to_thread(import_student_rows, class_id, raw)
+    except RosterError as exc:
+        raise _roster_error(exc) from exc
+    reset_display_codes()
+    return result
+
+
+@app.post("/api/admin/students")
+async def admin_add_student(
+    class_name: str = Form(...),
+    full_name: str = Form(...),
+    gioi_tinh: str = Form(""),
+    ngay_sinh: str = Form(""),
+    student_id: str = Form(""),
+    files: list[UploadFile] | None = File(None),
+):
+    photos = await _photo_blobs(files)
+    try:
+        row = await asyncio.to_thread(
+            add_student,
+            class_name=class_name,
+            full_name=full_name,
+            gioi_tinh=gioi_tinh,
+            ngay_sinh=ngay_sinh,
+            student_id=student_id,
+            photos=photos,
+        )
+    except RosterError as exc:
+        raise _roster_error(exc) from exc
+    reset_display_codes()
+    return row
+
+
+@app.patch("/api/admin/students/{student_id}")
+async def admin_update_student(student_id: str, request: Request):
+    body = await request.json()
+    try:
+        row = await asyncio.to_thread(
+            update_student,
+            student_id,
+            full_name=body.get("full_name"),
+            class_name=body.get("class_name"),
+            gioi_tinh=body.get("gioi_tinh"),
+            ngay_sinh=body.get("ngay_sinh"),
+        )
+    except RosterError as exc:
+        raise _roster_error(exc) from exc
+    reset_display_codes()
+    return row
+
+
+@app.post("/api/admin/students/{student_id}/photos")
+async def admin_add_photos(student_id: str, files: list[UploadFile] | None = File(None)):
+    photos = await _photo_blobs(files)
+    try:
+        row = await asyncio.to_thread(add_photos, student_id, photos)
+    except RosterError as exc:
+        raise _roster_error(exc) from exc
+    return row
+
+
+@app.delete("/api/admin/students/{student_id}")
+async def admin_delete_student(student_id: str):
+    try:
+        await asyncio.to_thread(delete_student, student_id)
+    except RosterError as exc:
+        raise _roster_error(exc) from exc
+    reset_display_codes()
+    return {"ok": True}
+
+
+_photo_slots = asyncio.Semaphore(4)
+
+
+@app.get("/api/admin/students/{student_id}/photo")
+async def admin_student_photo(student_id: str):
+    async with _photo_slots:
+        try:
+            jpeg = await asyncio.to_thread(first_photo_jpeg, student_id)
+        except Exception as exc:
+            from pymongo.errors import PyMongoError
+            if isinstance(exc, PyMongoError):
+                raise HTTPException(503, "Chưa kết nối được cơ sở dữ liệu") from exc
+            raise
+    if jpeg is None:
+        raise HTTPException(404, "Chưa có ảnh")
+    return Response(content=jpeg, media_type="image/jpeg")
+
+
+@app.get("/api/admin/reports")
+async def admin_reports(page: int = 1, page_size: int = 8):
+    return await asyncio.to_thread(list_reports, page, page_size, REPORTS_DIR)
+
+
+@app.delete("/api/admin/reports")
+async def admin_delete_reports(request: Request):
+    body = await request.json()
+    names = body.get("names") if isinstance(body, dict) else None
+    if not isinstance(names, list):
+        raise HTTPException(400, "Cần danh sách báo cáo.")
+    try:
+        deleted = await asyncio.to_thread(delete_reports, [str(item) for item in names], REPORTS_DIR)
+    except RosterError as exc:
+        raise _roster_error(exc) from exc
+    return {"ok": True, "deleted": deleted}
+
+
+@app.get("/api/admin/reports/{name}/preview")
+async def admin_report_preview(name: str):
+    if not re.fullmatch(r"bao_cao_hanh_vi_[0-9_]+_[0-9a-f]+\.xlsx", name):
+        raise HTTPException(404, "Không thấy báo cáo")
+    from core.mongo_roster import preview_report
+    try:
+        return await asyncio.to_thread(preview_report, name)
+    except RosterError as exc:
+        raise HTTPException(404, str(exc)) from exc
+
+
+@app.get("/api/admin/reports/{name}")
+async def admin_report_file(name: str):
+    if not re.fullmatch(r"bao_cao_hanh_vi_[0-9_]+_[0-9a-f]+\.xlsx", name):
+        raise HTTPException(404, "Không thấy báo cáo")
+    data = _read_report(name)
+    if data is None:
+        raise HTTPException(404, "Không thấy báo cáo")
+    return Response(
+        content=data,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{name}"'},
+    )
+
+
+@app.post("/api/admin/rebuild-gallery")
+async def admin_rebuild_gallery():
+    global _recognizer
+    try:
+        rec = await asyncio.to_thread(FaceRecognizer, True)
+    except Exception as exc:  # noqa: BLE001
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
+    reset_display_codes()
+    with _recognizer_lock:
+        _recognizer = rec
+    return {"ok": True, "students": len(rec.ids)}
+
+
 @app.get("/api/legend")
 @app.get("/api/behaviors")
 async def legend():
@@ -446,10 +670,11 @@ async def set_behaviors(request: Request):
 
 @app.get("/api/ernu")
 def ernu_config():
-    """Cấu hình diễn giải E/R/N/U + đường dẫn ACTIVITY_CONTEXT."""
+    """Cấu hình diễn giải E/R/N/U + proxy + đường dẫn ACTIVITY_CONTEXT."""
     e = _config.ernu
     return {
         "rules_version": e.rules_version,
+        "rules_path": getattr(e, "rules_path", "") or "",
         "window_sec": e.window_sec,
         "c_min": e.c_min,
         "publish_c_min": e.publish_c_min,
@@ -463,9 +688,21 @@ def ernu_config():
             "B5": e.min_duration_b5,
         },
         "beei_weights": {"w_E": e.beei_w_e, "w_R": e.beei_w_r, "w_N": e.beei_w_n},
+        "proxy_mapping": getattr(e, "proxy_mapping", None) or {
+            "E": "ON", "R": "PENDING", "N": "UNCERTAIN", "U": "NO_DATA",
+        },
+        "activities": {
+            "A1": "Nghe giảng / quan sát bảng",
+            "A2": "Ghi chép / làm bài cá nhân",
+            "A3": "Đọc sách / tài liệu",
+            "A4": "Hỏi đáp / phát biểu",
+            "A5": "Thảo luận nhóm / theo cặp",
+            "CHUA_XAC_MINH": "Chưa xác nhận nhiệm vụ",
+        },
         "disclaimer": (
             "E/R/N/U không phải điểm tập trung nhận thức. "
-            "BEEI chỉ là chỉ số phụ. Không xếp hạng học sinh."
+            "Proxy ON/PENDING/UNCERTAIN/NO_DATA diễn giải theo nhiệm vụ; "
+            "OFF chỉ sau xác nhận xem lại. BEEI chỉ là chỉ số phụ. Không xếp hạng học sinh."
         ),
     }
 
@@ -475,13 +712,16 @@ async def set_activity_context(request: Request):
     """Gán đường dẫn ACTIVITY_CONTEXT (.xlsx/.json) hoặc segments JSON.
 
     Body: {"path": "..."} hoặc {"segments": [{"start_sec", "end_sec", "activity_code", ...}]}.
+    activity_code ∈ A1–A5 hoặc CHUA_XAC_MINH.
     Áp dụng cho phiên đang ghi (recorder) và cấu hình toàn cục.
     """
     from core.activity_context import load_activity_context
+    from core.ernu import UNCONFIRMED_ACTIVITY, VALID_ACTIVITIES
 
     body = await request.json()
     path = (body.get("path") or "").strip()
     segments = body.get("segments")
+    allowed = set(VALID_ACTIVITIES) | {UNCONFIRMED_ACTIVITY, "UNKNOWN", "UNCONFIRMED", "?"}
     if path:
         _config.ernu.activity_context_path = path
         segs = load_activity_context(path)
@@ -495,8 +735,10 @@ async def set_activity_context(request: Request):
             if e <= s:
                 continue
             code = str(row.get("activity_code") or "").strip().upper()
-            if code not in ("A1", "A2", "A3", "A4", "A5"):
+            if code not in allowed:
                 continue
+            if code in ("UNKNOWN", "UNCONFIRMED", "?"):
+                code = UNCONFIRMED_ACTIVITY
             segs.append({
                 "start_sec": s, "end_sec": e, "activity_code": code,
                 "teacher_task": str(row.get("teacher_task") or row.get("task_note") or ""),
@@ -515,9 +757,46 @@ async def set_activity_context(request: Request):
     return {
         "ok": True,
         "n_segments": len(segs),
+        "segments": segs,
         "sessions_updated": applied,
         "activity_context_path": _config.ernu.activity_context_path,
         "default_activity": _config.ernu.default_activity,
+    }
+
+
+@app.post("/api/ernu/review-confirm")
+async def ernu_review_confirm(request: Request):
+    """Xác nhận cửa sổ R → OFF (hoặc giữ PENDING nếu confirmed_off=false).
+
+    Body: {student_id, start_sec, end_sec, confirmed_off?: true}
+    Không đổi nhãn E/R/N/U của máy.
+    """
+    body = await request.json()
+    sid = str(body.get("student_id") or "").strip()
+    try:
+        start_sec = float(body["start_sec"])
+        end_sec = float(body["end_sec"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise HTTPException(400, f"Cần student_id, start_sec, end_sec: {exc}") from exc
+    if not sid or end_sec <= start_sec:
+        raise HTTPException(400, "student_id rỗng hoặc khoảng thời gian không hợp lệ")
+    confirmed_off = bool(body.get("confirmed_off", True))
+
+    updated = []
+    with _sessions_lock:
+        sessions = list(_sessions)
+    if not sessions:
+        raise HTTPException(404, "Không có phiên đang chạy")
+    for s in sessions:
+        row = s.recorder.add_review_confirmation(sid, start_sec, end_sec, confirmed_off)
+        updated.append(row)
+    return {
+        "ok": True,
+        "confirmed_off": confirmed_off,
+        "proxy_if_r": "OFF" if confirmed_off else "PENDING",
+        "sessions_updated": len(updated),
+        "confirmation": updated[0] if updated else None,
+        "note": "Chỉ áp dụng khi cửa sổ khớp có pred_label=R; không tự gán OFF từ máy.",
     }
 
 
@@ -811,16 +1090,14 @@ async def websocket_endpoint(ws: WebSocket):
                 ended = await asyncio.to_thread(session.end_session)
                 if ended is not None:
                     old_id, old_rec = ended
-                    path = await asyncio.to_thread(
-                        old_rec.export_excel, REPORTS_DIR / old_rec.report_name
-                    )
+                    name = await asyncio.to_thread(_save_report, old_id)
                     await ws.send_json({
                         "status": "session_cut",
                         "message": (
-                            f"Đã ngắt phiên · đã lưu {path.name}. "
+                            f"Đã ngắt phiên · báo cáo {name} đã lưu trên hệ thống. "
+                            "Xem và tải tại trang Quản lý lớp. "
                             "Đoạn giao thoa chưa được ghi. Bấm Bắt đầu phiên khi tiết mới bắt đầu."
                         ),
-                        "closed_report_url": f"/api/report/{old_id}",
                         "report_url": f"/api/report/{old_id}",
                         "session_id": old_id,
                     })
@@ -879,10 +1156,10 @@ async def websocket_endpoint(ws: WebSocket):
             elif session.eof.is_set():
                 if session.recording:
                     await send_summary()
-                    path = await asyncio.to_thread(_save_report, session.session_id)
+                    name = await asyncio.to_thread(_save_report, session.session_id)
                     await ws.send_json({
                         "status": "ended",
-                        "message": f"Video đã phát xong · đã lưu báo cáo {path.name}",
+                        "message": f"Video đã phát xong · báo cáo {name} đã lưu. Xem và tải tại trang Quản lý lớp.",
                         "report_url": f"/api/report/{session.session_id}",
                     })
                 else:
@@ -913,8 +1190,8 @@ async def websocket_endpoint(ws: WebSocket):
             await asyncio.to_thread(session.close)
             if session.recording:
                 try:
-                    path = await asyncio.to_thread(_save_report, session.session_id)
-                    print(f"Đã lưu báo cáo hành vi: {path}")
+                    name = await asyncio.to_thread(_save_report, session.session_id)
+                    print(f"Đã lưu báo cáo hành vi: {name}")
                 except Exception as exc:  # noqa: BLE001
                     print(f"Không lưu được báo cáo hành vi: {exc}")
         elif cap is not None:
@@ -938,25 +1215,50 @@ def _register_report(session_id: str, recorder: BehaviorRecorder) -> None:
             _reports.pop(next(iter(_reports)))
 
 
-def _save_report(session_id: str) -> Path:
+def _write_report(name: str, data: bytes) -> None:
+    from core.db import enabled
+    if enabled():
+        from core.mongo_roster import save_report_bytes
+        save_report_bytes(name, data)
+        return
+    REPORTS_DIR.mkdir(parents=True, exist_ok=True)
+    (REPORTS_DIR / name).write_bytes(data)
+
+
+def _read_report(name: str) -> bytes | None:
+    from core.db import enabled
+    if enabled():
+        from core.mongo_roster import get_report_bytes
+        return get_report_bytes(name)
+    path = (REPORTS_DIR / name).resolve()
+    if path.parent != REPORTS_DIR.resolve() or not path.is_file():
+        return None
+    return path.read_bytes()
+
+
+def _save_report(session_id: str) -> str:
     with _reports_lock:
         recorder = _reports.get(session_id)
     if recorder is None:
         raise KeyError(session_id)
-    return recorder.export_excel(REPORTS_DIR / recorder.report_name)
+    _write_report(recorder.report_name, recorder.workbook_bytes())
+    return recorder.report_name
 
 
 @app.get("/api/report/{session_id}")
 def download_report(session_id: str):
     """Xuất Excel hành vi của phiên (đang chạy hoặc đã kết thúc)."""
     try:
-        path = _save_report(session_id)
+        name = _save_report(session_id)
     except KeyError:
-        raise HTTPException(404, "Không tìm thấy phiên — báo cáo cũ nằm trong thư mục reports/")
-    return FileResponse(
-        path,
-        filename=path.name,
+        raise HTTPException(404, "Không tìm thấy phiên — báo cáo cũ nằm trên MongoDB Atlas hoặc thư mục reports/")
+    data = _read_report(name)
+    if not data:
+        raise HTTPException(404, "Không thấy nội dung báo cáo")
+    return Response(
+        content=data,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{name}"'},
     )
 
 
@@ -999,6 +1301,11 @@ def main() -> None:
     except Exception as exc:  # noqa: BLE001
         print(f"Không nạp được EasyOCR — báo cáo sẽ dùng vị trí trong video: {exc}")
     print(f"Mở trình duyệt: http://{args.host}:{args.port}")
+    try:
+        from lxml import etree
+        etree.fromstring(b"<a/>")
+    except Exception:
+        pass
     uvicorn.run(app, host=args.host, port=args.port, log_level="warning")
 
 

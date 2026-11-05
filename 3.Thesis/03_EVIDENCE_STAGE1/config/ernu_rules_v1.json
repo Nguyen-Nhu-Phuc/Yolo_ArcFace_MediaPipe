@@ -22,9 +22,9 @@
   },
   "matrix": {
     "B1": {"A1": "E", "A2": "E", "A3": "E", "A4": "E", "A5": "E"},
-    "B2": {"A1": "N", "A2": "E", "A3": "N", "A4": "N", "A5": "N"},
+    "B2": {"A1": "E", "A2": "E", "A3": "E", "A4": "E", "A5": "E"},
     "B3": {"A1": "N", "A2": "N", "A3": "N", "A4": "N", "A5": "N"},
-    "B4": {"A1": "R", "A2": "N", "A3": "N", "A4": "R", "A5": "N"},
+    "B4": {"A1": "N", "A2": "N", "A3": "N", "A4": "N", "A5": "N"},
     "B5": {"A1": "R", "A2": "R", "A3": "R", "A4": "R", "A5": "R"},
     "NORMAL": {"A1": "N", "A2": "N", "A3": "N", "A4": "N", "A5": "N"},
     "MISSING": {"A1": "U", "A2": "U", "A3": "U", "A4": "U", "A5": "U"}
@@ -50,5 +50,14 @@
     "R": "Có dấu hiệu cần giáo viên xem lại",
     "N": "Quan sát được nhưng chưa đủ căn cứ",
     "U": "Không đủ dữ liệu quan sát"
-  }
+  },
+  "proxy_mapping": {
+    "E": "ON",
+    "R": "OFF",
+    "N": "UNCERTAIN",
+    "U": "NO_DATA"
+  },
+  "focus_threshold": 50.0,
+  "focus_min_valid_sec": 20.0,
+  "proxy_note": "Tự động: E→ON, R→OFF. focus_verdict khi T_valid ≥ focus_min_valid_sec và C trên thời gian đã thấy HS (không đòi bao phủ cả video). Không cần A1–A5 thủ công."
 }

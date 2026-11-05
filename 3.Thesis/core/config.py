@@ -13,6 +13,8 @@ CLASSROOM_YOLO = BASE_DIR / "models" / "yolo12_classroom" / "best.pt"
 POSE_WEIGHTS = BASE_DIR / "models" / "yolo11n-pose.pt"
 # Bật/tắt hành vi từ giao diện được lưu ở đây (giữ qua các lần chạy)
 BEHAVIOR_SETTINGS = DATA_DIR / "behavior_settings.json"
+# Quy tắc ERNU khóa trước kiểm thử cuối (có thể ghi đè bằng ERNU_RULES_PATH)
+DEFAULT_ERNU_RULES = BASE_DIR / "03_EVIDENCE_STAGE1" / "config" / "ernu_rules_v1.json"
 # Ẩn khỏi giao diện và luôn tắt (vẫn chạy được khi đo offline bằng tools/eval_behavior.py)
 HIDDEN_BEHAVIORS = frozenset({"Nói chuyện", "Tay bất thường", "Cúi đầu thoáng qua", "Nhắm mắt"})
 DEFAULT_DISABLED = HIDDEN_BEHAVIORS
@@ -33,10 +35,10 @@ class BehaviorConfig:
     baseline_yaw_band: float = 15.0  # độ, lệch tối đa còn được đưa vào hướng nhìn nền
     # Cúi đầu: độ cao mũi trên đường vai (sw). Ngồi thẳng thường ~0.4–0.7.
     head_down_ratio: float = 0.25  # ngưỡng chung khi chưa đủ lịch sử tư thế của HS
-    head_down_drop: float = 0.35  # cúi = thấp hơn p75 độ cao đầu của chính HS ≥ N sw
+    head_down_drop: float = 0.45  # cúi = thấp hơn p75 độ cao đầu của chính HS ≥ N sw
     head_baseline_min_samples: int = 20
     head_baseline_window: int = 300
-    head_down_pitch: float = 25.0  # độ, khi InsightFace thấy mặt
+    head_down_pitch: float = 35.0  # độ, khi InsightFace thấy mặt
     head_down_duration: float = 5.0  # chỉ khi không có bằng chứng viết bài
     eye_closed_threshold: float = 0.18
     eye_closed_duration: float = 2.0
@@ -50,9 +52,14 @@ class BehaviorConfig:
     hand_low_duration: float = 2.0
     writing_min_drop: float = 0.4
     writing_max_drop: float = 2.5
-    writing_max_offset: float = 0.6
-    writing_min_speed: float = 0.15  # sw / giây — tay phải chuyển động, không chỉ nằm trên bàn
-    writing_move_window: float = 1.0
+    writing_max_offset: float = 0.85  # cổ tay lệch khỏi giữa vai, vẫn tính khi viết lệch sang một bên
+    # Bề rộng vai trên khung phân tích (rộng tối đa 1280). Hàng đầu gần camera vai rộng,
+    # tay trên bàn nằm gần ống kính hơn vai nên trong ảnh thấp và xòe rộng hơn.
+    writing_far_sw: float = 70.0
+    writing_near_sw: float = 220.0
+    writing_kp_min_conf: float = 0.35  # cổ tay trên bàn thường bị che, thấp hơn ngưỡng khớp chung
+    writing_min_speed: float = 0.05  # sw / giây — tay phải chuyển động, không chỉ nằm trên bàn
+    writing_move_window: float = 2.0  # nhịp tay trong cửa sổ này vẫn là đang bắt được viết bài
     hand_raise_duration: float = 1.0  # cổ tay + khuỷu + vai, giữ đủ lâu mới gắn nhãn
     head_rotation_threshold: float = 30.0
     head_rotation_duration: float = 2.0
@@ -99,6 +106,23 @@ def _resolve_yolo_weights() -> str:
     return coco
 
 
+def _default_ernu_matrix() -> dict[str, dict[str, str]]:
+    acts = ("A1", "A2", "A3", "A4", "A5")
+    return {
+        "B1": {a: "E" for a in acts},
+        "B2": {a: "E" for a in acts},  # tự động: viết bài = bằng chứng tập trung, không cần A2
+        "B3": {a: "N" for a in acts},
+        "B4": {a: "N" for a in acts},  # cúi đầu lâu: không tính không tập trung (có thể đang viết/đọc)
+        "B5": {a: "R" for a in acts},
+        "NORMAL": {a: "N" for a in acts},
+        "MISSING": {a: "U" for a in acts},
+    }
+
+
+def _default_proxy_mapping() -> dict[str, str]:
+    return {"E": "ON", "R": "OFF", "N": "UNCERTAIN", "U": "NO_DATA"}
+
+
 @dataclass
 class ErnuConfig:
     """Ngưỡng diễn giải E/R/N/U theo cửa sổ — giá trị khởi tạo để thử nghiệm, chưa kiểm chứng.
@@ -127,6 +151,13 @@ class ErnuConfig:
     activity_context_path: str = field(
         default_factory=lambda: (os.environ.get("ERNU_ACTIVITY_CONTEXT") or "").strip()
     )
+    rules_path: str = ""
+    matrix: dict[str, dict[str, str]] = field(default_factory=_default_ernu_matrix)
+    proxy_mapping: dict[str, str] = field(default_factory=_default_proxy_mapping)
+    # Ngưỡng điểm hết phiên: >= focus_threshold → "Tập trung"
+    focus_threshold: float = 50.0
+    # Kết luận tập trung khi đã quan sát hợp lệ tối thiểu (giây) — không đòi bao phủ cả video
+    focus_min_valid_sec: float = 20.0
 
     def min_duration(self, b_code: str) -> float:
         return {
@@ -136,6 +167,64 @@ class ErnuConfig:
             "B4": self.min_duration_b4,
             "B5": self.min_duration_b5,
         }.get(b_code, 0.0)
+
+    @classmethod
+    def load_rules(cls, path: str | Path | None = None) -> "ErnuConfig":
+        """Nạp ernu_rules_*.json; thiếu file → mặc định cứng trong code."""
+        cfg = cls()
+        raw_path = path or (os.environ.get("ERNU_RULES_PATH") or "").strip() or str(DEFAULT_ERNU_RULES)
+        p = Path(raw_path)
+        cfg.rules_path = str(p)
+        if not p.exists():
+            print(f"Cảnh báo: không thấy {p} — dùng ErnuConfig mặc định.")
+            return cfg
+        try:
+            data = json.loads(p.read_text(encoding="utf-8"))
+        except Exception as exc:  # noqa: BLE001
+            print(f"Cảnh báo: không đọc được {p}: {exc} — dùng mặc định.")
+            return cfg
+
+        cfg.rules_version = str(data.get("rules_version") or cfg.rules_version)
+        if "window_sec" in data:
+            cfg.window_sec = float(data["window_sec"])
+        if "c_min" in data:
+            cfg.c_min = float(data["c_min"])
+        if "publish_c_min" in data:
+            cfg.publish_c_min = float(data["publish_c_min"])
+        if "default_activity" in data:
+            cfg.default_activity = str(data["default_activity"]).strip().upper() or "A1"
+        md = data.get("min_duration_sec") or {}
+        if "B1" in md:
+            cfg.min_duration_b1 = float(md["B1"])
+        if "B2" in md:
+            cfg.min_duration_b2 = float(md["B2"])
+        if "B3" in md:
+            cfg.min_duration_b3 = float(md["B3"])
+        if "B4" in md:
+            cfg.min_duration_b4 = float(md["B4"])
+        if "B5" in md:
+            cfg.min_duration_b5 = float(md["B5"])
+        beei = data.get("beei") or {}
+        if "w_E" in beei:
+            cfg.beei_w_e = float(beei["w_E"])
+        if "w_R" in beei:
+            cfg.beei_w_r = float(beei["w_R"])
+        if "w_N" in beei:
+            cfg.beei_w_n = float(beei["w_N"])
+        mat = data.get("matrix")
+        if isinstance(mat, dict) and mat:
+            cfg.matrix = {str(k): {str(a): str(lab) for a, lab in row.items()} for k, row in mat.items() if isinstance(row, dict)}
+        pm = data.get("proxy_mapping")
+        if isinstance(pm, dict) and pm:
+            cfg.proxy_mapping = {str(k).upper(): str(v).upper() for k, v in pm.items()}
+        if "focus_threshold" in data:
+            cfg.focus_threshold = float(data["focus_threshold"])
+        if "focus_min_valid_sec" in data:
+            cfg.focus_min_valid_sec = float(data["focus_min_valid_sec"])
+        # Chế độ tự động: luôn ưu tiên R→OFF nếu JSON chưa cập nhật
+        if cfg.proxy_mapping.get("R") == "PENDING":
+            cfg.proxy_mapping["R"] = "OFF"
+        return cfg
 
 
 @dataclass
@@ -170,17 +259,52 @@ class Config:
 
 def load_config() -> Config:
     cfg = Config()
-    if BEHAVIOR_SETTINGS.exists():
+    cfg.ernu = ErnuConfig.load_rules()
+    # Giữ ACTIVITY_CONTEXT từ env nếu rules JSON không ghi đè path
+    env_act = (os.environ.get("ERNU_ACTIVITY_CONTEXT") or "").strip()
+    if env_act:
+        cfg.ernu.activity_context_path = env_act
+    disabled = _behavior_disabled()
+    if disabled is None and BEHAVIOR_SETTINGS.exists():
         try:
             data = json.loads(BEHAVIOR_SETTINGS.read_text(encoding="utf-8"))
-            cfg.behavior.disabled = frozenset(data.get("disabled", [])) | HIDDEN_BEHAVIORS
+            disabled = list(data.get("disabled", []))
+            _store_behavior_disabled(disabled)
         except Exception as exc:  # noqa: BLE001
             print(f"Không đọc được {BEHAVIOR_SETTINGS.name}, dùng mặc định: {exc}")
+    if disabled is not None:
+        cfg.behavior.disabled = frozenset(disabled) | HIDDEN_BEHAVIORS
     return cfg
 
 
+def _behavior_disabled() -> list | None:
+    from core.db import enabled, get_db
+    if not enabled():
+        return None
+    doc = get_db().settings.find_one({"_id": "behavior"})
+    if doc is None:
+        return None
+    return list(doc.get("disabled") or [])
+
+
+def _store_behavior_disabled(disabled: list) -> None:
+    from core.db import enabled, get_db
+    if not enabled():
+        return
+    get_db().settings.replace_one(
+        {"_id": "behavior"},
+        {"_id": "behavior", "disabled": list(disabled)},
+        upsert=True,
+    )
+
+
 def save_behavior_settings(cfg: Config) -> None:
+    disabled = sorted(cfg.behavior.disabled)
+    from core.db import enabled
+    if enabled():
+        _store_behavior_disabled(disabled)
+        return
     BEHAVIOR_SETTINGS.write_text(
-        json.dumps({"disabled": sorted(cfg.behavior.disabled)}, ensure_ascii=False, indent=2),
+        json.dumps({"disabled": disabled}, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )

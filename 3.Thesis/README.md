@@ -154,23 +154,29 @@ thử hàng trăm bộ ngưỡng trong vài giây mà không phải chạy lại
    Một đợt dự đoán được tính là khớp nhãn khi cùng HS, cùng hành vi và phần chồng lên nhau ≥ 30% đợt ngắn hơn.
    Bộ tham số tốt nhất thì ghi vào `BehaviorConfig` trong `core/config.py`.
 
-## Bộ tiêu chí ERNU (E/R/N/U)
+## Bộ tiêu chí ERNU (E/R/N/U) + proxy nhiệm vụ
 
 Diễn giải hành vi thô theo ngữ cảnh A1–A5 → nhãn cửa sổ E/R/N/U (`core/ernu.py`).
-Quy tắc đã khóa: `03_EVIDENCE_STAGE1/config/ernu_rules_v1.json`.
+Quy tắc nạp lúc chạy từ `03_EVIDENCE_STAGE1/config/ernu_rules_v1.json` (hoặc `ERNU_RULES_PATH`).
+
+**Proxy vận hành** (không phải tập trung nhận thức): `E→ON`, `R→PENDING`, `N→UNCERTAIN`, `U→NO_DATA`.
+`OFF` chỉ sau xác nhận giáo viên (`POST /api/ernu/review-confirm` hoặc form tab **Ngữ cảnh A**). Không tự gán OFF từ R.
 
 ```bash
 # Nạp bảng ACTIVITY_CONTEXT (A1–A5 do giáo viên xác nhận)
 set ERNU_ACTIVITY_CONTEXT=..\Mau_Gan_Nhan_Hanh_Vi_Lop_Hoc.xlsx
+# Tuỳ chọn: đường dẫn rules JSON
+set ERNU_RULES_PATH=03_EVIDENCE_STAGE1\config\ernu_rules_v1.json
 
 # Tạo / cập nhật workbook gán nhãn đối chứng (Phụ lục A)
 python -m tools.make_annotation_workbook
 
-# Đối chiếu GT độc lập (không dùng pred làm GT)
+# Đối chiếu GT độc lập (không dùng pred làm GT) — có block proxy trong JSON
 python -m tools.eval_ernu --gt ../Mau_Gan_Nhan_Hanh_Vi_Lop_Hoc.xlsx --pred reports/bao_cao_....xlsx
 ```
 
-Excel xuất thêm sheet `PREDICTED_WINDOWS`, `TONG_HOP_ERNU`, `DIEN_GIAI_ERNU`.
+UI: tab **Ngữ cảnh A** để thêm đoạn A1–A5 / `CHUA_XAC_MINH`; tab **Lớp học** hiện P_ON / P_PENDING / P_OFF.
+Excel: `PREDICTED_WINDOWS` có cột `proxy_label` / `confirmed_off`; `TONG_HOP_ERNU` có T_*/P_* proxy.
 Checklist trước kiểm thử cuối: `03_EVIDENCE_STAGE1/tests/checklist_ERNU_Phu_luc_B.md`.
 
 ## Màu box
@@ -192,6 +198,7 @@ Nhãn trên khung: `1 · Cúi đầu lâu` = số thứ tự trong danh sách h�
 | `YOLO_MODEL_PATH` | Đường dẫn `.pt` YOLO bất kỳ (ghi đè) | — |
 | `POSE_MODEL` | Model pose | `models/yolo11n-pose.pt` |
 | `ERNU_ACTIVITY_CONTEXT` | File `.xlsx`/`.json` bảng A1–A5 | (trống → mặc định A1) |
+| `ERNU_RULES_PATH` | File quy tắc ERNU JSON | `03_EVIDENCE_STAGE1/config/ernu_rules_v1.json` |
 | `CLASSROOM_FACES_DIR` / `ARCFACE_MODEL_DIR` | Dataset / gallery ArcFace | `2.Data/2_dataset_arcface` |
 
 Ngưỡng hành vi nằm trong `core/config.py` (`BehaviorConfig`).

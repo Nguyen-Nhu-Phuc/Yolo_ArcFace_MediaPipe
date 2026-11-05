@@ -21,3 +21,13 @@ classroom-faces/
 *_dataset_arcface/
 *_dataset_arcface.zip
 _probe_home.html
+.env
+3.Thesis/.env
+
+# File nằm ngay thư mục gốc — không đẩy lên GitHub. Thư mục con vẫn được theo dõi.
+/*
+!/.gitignore
+!/*/
+/.venv/
+/.venv-compare/
+/venv/

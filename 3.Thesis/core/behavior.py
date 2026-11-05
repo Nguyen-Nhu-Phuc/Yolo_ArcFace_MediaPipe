@@ -125,8 +125,9 @@ def behavior_legend(config: Config) -> list[dict]:
             "Không kết luận học sinh đang ngủ. Không báo khi đang viết bài."
         ),
         "Cúi đầu lâu": (
-            f"Cúi đầu ≥ {bh.head_down_duration:g} giây so với tư thế nền của chính em đó, "
-            "và không có bằng chứng viết bài."
+            f"Cúi đầu ≥ {bh.head_down_duration:g} giây so với tư thế nền của chính em đó. "
+            "Nếu vừa bắt được viết bài, chỉ tính những giây nhìn thấy tay không còn viết; "
+            "mất tay hoặc mất tư thế chưa phải chứng minh."
         ),
         "Không xác định": (
             "Che khuất, quay lưng hoặc thiếu điểm khớp quan trọng — không kết luận hành vi."
@@ -136,7 +137,9 @@ def behavior_legend(config: Config) -> list[dict]:
         ),
         "Viết bài": (
             "Cúi đầu, cổ tay ở khu vực bàn và tay đang chuyển động. "
-            "Không kết luận chỉ vì cúi đầu."
+            "Học sinh ngồi gần camera được nới vùng tay vì góc nhìn làm tay xòe rộng và thấp hơn vai. "
+            "Đã bắt được thì giữ nhãn viết bài. Chỉ đổi sang cúi đầu lâu khi có đủ giây "
+            "nhìn thấy đầu vẫn cúi và tay không còn viết."
         ),
         "Quay đầu": (
             f"Lệch > {bh.head_rotation_threshold:g}° so với hướng nhìn thường ngày của chính em đó, "
@@ -240,12 +243,53 @@ def _head_point(keypoints, conf: float):
     return float(np.mean([p[0] for p in pts])), float(np.mean([p[1] for p in pts]))
 
 
+def _near_factor(sw: float, bh) -> float:
+    """0 = ngồi xa, 1 = hàng đầu sát camera. Suy từ bề rộng vai trên ảnh."""
+    span = max(bh.writing_near_sw - bh.writing_far_sw, 1.0)
+    return float(min(1.0, max(0.0, (sw - bh.writing_far_sw) / span)))
+
+
+def _writing_limits(sw: float, bh) -> tuple[float, float, float, float]:
+    """(độ tụt tối thiểu, tối đa, lệch ngang tối đa, tốc độ tối thiểu).
+
+    Ngồi gần: tay phía ống kính bị phóng so với vai, và một nét bút là ít bề rộng vai hơn.
+    """
+    near = _near_factor(sw, bh)
+    min_drop = bh.writing_min_drop * (1.0 - 0.75 * near)
+    max_drop = bh.writing_max_drop + 3.0 * near
+    max_offset = bh.writing_max_offset + 1.2 * near
+    min_speed = bh.writing_min_speed * (1.0 - 0.45 * near)
+    return min_drop, max_drop, max_offset, min_speed
+
+
+def _writing_hands(keypoints, bh) -> str:
+    """'zone' nếu có cổ tay ở bàn, 'away' nếu thấy tay nhưng không ở bàn, 'unseen' nếu không thấy tay."""
+    sw = shoulder_width(keypoints, bh.kp_min_conf)
+    if sw is None:
+        return "unseen"
+    indexes = [9, 10]
+    if _near_factor(sw, bh) >= 0.45:
+        for wrist_i, elbow_i in ((9, 7), (10, 8)):
+            if not _ok(keypoints[wrist_i], bh.writing_kp_min_conf):
+                indexes.append(elbow_i)
+    seen = False
+    for index in indexes:
+        wrist = keypoints[index]
+        if not _ok(wrist, bh.writing_kp_min_conf):
+            continue
+        seen = True
+        if _wrist_in_writing_zone(wrist, keypoints, sw, bh):
+            return "zone"
+    return "away" if seen else "unseen"
+
+
 def _wrist_in_writing_zone(wrist, keypoints, sw: float, bh) -> bool:
     shoulder_y = (keypoints[5][1] + keypoints[6][1]) / 2
     center_x = (keypoints[5][0] + keypoints[6][0]) / 2
     drop = (wrist[1] - shoulder_y) / sw
     offset = abs(wrist[0] - center_x) / sw
-    return bh.writing_min_drop <= drop <= bh.writing_max_drop and offset <= bh.writing_max_offset
+    min_drop, max_drop, max_offset, _speed = _writing_limits(sw, bh)
+    return min_drop <= drop <= max_drop and offset <= max_offset
 
 
 def _hand_low(keypoints, bh) -> bool:
@@ -350,6 +394,9 @@ class StudentStateTracker:
         self.last_turn: dict = {}
         self.last_speed: dict = {}
         self.wrist_hist: dict = {}
+        self.writing_latched: dict = {}
+        self.writing_gap: dict = {}
+        self.writing_soft: dict = {}
         self._smooth: dict = {}
 
     def forget(self, student_id) -> None:
@@ -357,14 +404,38 @@ class StudentStateTracker:
             for k in [k for k in keyed if k[0] == student_id]:
                 del keyed[k]
         for d in (self.clock, self.head_track, self.head_heights, self.turn_side,
-                  self.last_turn, self.last_speed, self._smooth):
+                  self.last_turn, self.last_speed, self.writing_latched, self.writing_gap,
+                  self.writing_soft, self._smooth):
             d.pop(student_id, None)
+
+    def _drop_writing(self, student_id, reset_bow: bool) -> None:
+        """Thả nhãn viết bài. reset_bow khi chưa đủ chứng minh cúi đầu, để không nhảy nhãn."""
+        self.writing_latched.pop(student_id, None)
+        self.writing_gap.pop(student_id, None)
+        self.writing_soft.pop(student_id, None)
+        for key in [k for k in self.wrist_hist if k[0] == student_id]:
+            del self.wrist_hist[key]
+        if not reset_bow:
+            return
+        bow = self._timers.get((student_id, "Cúi đầu lâu"))
+        if bow is not None:
+            bow.on = 0.0
+            bow.miss = 0.0
+
+    def pause_writing(self, student_id, dt: float, bh) -> None:
+        """Mất đầu hoặc mất tư thế: giữ nhãn viết trong dung sai, rồi xóa và không cộng cúi đầu."""
+        if not self.writing_latched.get(student_id):
+            return
+        self.writing_gap[student_id] = self.writing_gap.get(student_id, 0.0) + dt
+        if self.writing_gap[student_id] > bh.miss_tolerance_sec:
+            self._drop_writing(student_id, reset_bow=True)
 
     def timer(self, student_id, name: str, active: bool, dt: float, bh) -> float:
         return self._timers[(student_id, name)].step(active, dt, bh.miss_tolerance_sec)
 
     def decay(self, student_id, dt: float, bh) -> None:
         """Mất tư thế: không kéo dài hành vi, quá dung sai thì xóa bộ đếm."""
+        self.pause_writing(student_id, dt, bh)
         for name in _TIMED:
             if bh.is_on(name):
                 self.timer(student_id, name, False, dt, bh)
@@ -477,40 +548,54 @@ class StudentStateTracker:
         return turn
 
     def writing(self, student_id, keypoints, bh, head_is_down: bool) -> bool:
-        """Cúi đầu + tay ở bàn + tay đang chuyển động. Cúi đầu một mình không đủ."""
-        if not head_is_down:
-            return False
-        conf = bh.kp_min_conf
-        sw = shoulder_width(keypoints, conf)
-        if sw is None:
-            return False
-        t = self.clock[student_id]
-        moving = False
-        for index in (9, 10):
-            wrist = keypoints[index]
-            key = (student_id, index)
-            hist = self.wrist_hist.get(key)
-            if hist is None:
-                hist = self.wrist_hist[key] = deque(maxlen=48)
-            if not _ok(wrist, conf):
-                continue
-            hist.append((t, float(wrist[0]), float(wrist[1]), sw))
-            if not _wrist_in_writing_zone(wrist, keypoints, sw, bh):
-                continue
-            pts = [p for p in hist if t - p[0] <= bh.writing_move_window]
-            if len(pts) < 2:
-                continue
-            elapsed = pts[-1][0] - pts[0][0]
-            if elapsed < 0.4:
-                continue
-            path = sum(
-                float(np.hypot(b[1] - a[1], b[2] - a[2]))
-                for a, b in zip(pts, pts[1:])
-            )
-            sw_mean = float(np.mean([p[3] for p in pts]))
-            if path / sw_mean / elapsed >= bh.writing_min_speed:
-                moving = True
-        return moving
+        """Cúi đầu + tay ở bàn + tay đang chuyển động. Cúi đầu một mình không đủ.
+
+        Vẫn ghi lịch sử cổ tay khi đầu chưa bị xếp là cúi, để một khung lệch ngưỡng
+        không làm mất nhịp vừa viết. writing_soft: nhịp tay độ tin cậy thấp hơn,
+        chỉ dùng để gia hạn nhãn khi đã bắt được viết bài.
+        """
+        sw = shoulder_width(keypoints, bh.kp_min_conf)
+        soft = False
+        strict = False
+        if sw is not None:
+            t = self.clock[student_id]
+            wrist_conf = bh.writing_kp_min_conf
+            _min_drop, _max_drop, _max_offset, min_speed = _writing_limits(sw, bh)
+            # Cổ tay hàng đầu hay bị bàn che hoặc sát mép khung; khuỷu vẫn thấy.
+            indexes = [9, 10]
+            if _near_factor(sw, bh) >= 0.45:
+                for wrist_i, elbow_i in ((9, 7), (10, 8)):
+                    if not _ok(keypoints[wrist_i], wrist_conf):
+                        indexes.append(elbow_i)
+            for index in indexes:
+                wrist = keypoints[index]
+                key = (student_id, index)
+                hist = self.wrist_hist.get(key)
+                if hist is None:
+                    hist = self.wrist_hist[key] = deque(maxlen=48)
+                if not _ok(wrist, wrist_conf):
+                    continue
+                hist.append((t, float(wrist[0]), float(wrist[1]), sw))
+                if not head_is_down or not _wrist_in_writing_zone(wrist, keypoints, sw, bh):
+                    continue
+                pts = [p for p in hist if t - p[0] <= bh.writing_move_window]
+                if len(pts) < 2:
+                    continue
+                elapsed = pts[-1][0] - pts[0][0]
+                if elapsed < 0.4:
+                    continue
+                path = sum(
+                    float(np.hypot(b[1] - a[1], b[2] - a[2]))
+                    for a, b in zip(pts, pts[1:])
+                )
+                sw_mean = float(np.mean([p[3] for p in pts]))
+                if path / sw_mean / elapsed < min_speed:
+                    continue
+                soft = True
+                if _ok(wrist, bh.kp_min_conf):
+                    strict = True
+        self.writing_soft[student_id] = soft
+        return strict
 
 
 def _emit(reasons: list[str], active: bool, held: float, need: float, text: str) -> None:
@@ -544,9 +629,44 @@ def detect_behaviors(keypoints, config: Config,
     tol_timer = state_tracker.timer
     reasons: list[str] = []
     head_down = state_tracker.head_down(student_id, kpts, bh, signals.get("pitch"))
-    writing = bh.is_on("Viết bài") and state_tracker.writing(
+    # Nhịp tay đo trên điểm đã làm mượt. Cổ tay độ tin cậy thấp chỉ gia hạn khi đã bắt được.
+    fresh_writing = bh.is_on("Viết bài") and state_tracker.writing(
         student_id, kpts, bh, head_down is True)
-    desk = desk_evidence(kpts, bh) is True and not writing if bh.is_on("Gục xuống bàn") else False
+    soft_writing = bool(state_tracker.writing_soft.get(student_id))
+    hands = _writing_hands(kpts, bh)
+    raw_desk = desk_evidence(kpts, bh) is True if bh.is_on("Gục xuống bàn") else False
+    latched = bool(state_tracker.writing_latched.get(student_id))
+    # Đã bắt viết bài thì nhịp tay yếu hơn vẫn là đang viết, và xóa đồng hồ cúi đầu.
+    caught = fresh_writing or (latched and soft_writing)
+    if caught:
+        state_tracker.writing_latched[student_id] = True
+        state_tracker.writing_gap[student_id] = 0.0
+        bow = state_tracker._timers[(student_id, "Cúi đầu lâu")]
+        bow.on = 0.0
+        bow.miss = 0.0
+        latched = True
+    elif latched and head_down is not True:
+        state_tracker.pause_writing(student_id, dt, bh)
+        latched = bool(state_tracker.writing_latched.get(student_id))
+    elif latched:
+        state_tracker.writing_gap[student_id] = 0.0
+    # Chưa từng viết: cúi đầu vẫn tích như trước. Đã viết: chỉ tích khi nhìn thấy tay
+    # không còn nhịp viết. Mất tay thì giữ nguyên đồng hồ, không coi là đã cúi đủ lâu.
+    proving_bow = head_down is True and not caught and not raw_desk and (
+        not latched or hands != "unseen"
+    )
+    if bh.is_on("Cúi đầu lâu") and not (latched and not proving_bow):
+        held_bow = tol_timer(student_id, "Cúi đầu lâu", proving_bow, dt, bh)
+    else:
+        held_bow = state_tracker._timers[(student_id, "Cúi đầu lâu")].on if latched else 0.0
+    writing = False
+    if bh.is_on("Viết bài") and (caught or latched):
+        if caught or held_bow < bh.head_down_duration:
+            writing = True
+        else:
+            state_tracker._drop_writing(student_id, reset_bow=False)
+            latched = False
+    desk = raw_desk and not writing
     turn = state_tracker.turn_angle(
         student_id, head_yaw(kpts, signals, bh.kp_min_conf), bh, head_down is True)
 
@@ -554,9 +674,8 @@ def detect_behaviors(keypoints, config: Config,
         reasons.append("Viết bài")
 
     if bh.is_on("Cúi đầu lâu"):
-        active = head_down is True and not writing and not desk
-        held = tol_timer(student_id, "Cúi đầu lâu", active, dt, bh)
-        _emit(reasons, active, held, bh.head_down_duration, f"Cúi đầu lâu ({held:.1f}s)")
+        active = proving_bow and not writing
+        _emit(reasons, active, held_bow, bh.head_down_duration, f"Cúi đầu lâu ({held_bow:.1f}s)")
 
     if bh.is_on("Gục xuống bàn"):
         held = tol_timer(student_id, "Gục xuống bàn", desk, dt, bh)

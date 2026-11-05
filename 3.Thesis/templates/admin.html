@@ -1,0 +1,625 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Quản lý lớp — điểm danh</title>
+<style>
+:root {
+  --bg: #0b1120; --surface: #121a2b; --surface-2: #182236; --surface-3: #22304a;
+  --border: #25324a; --text: #e6ebf3; --muted: #8a96ad; --accent: #3b82f6;
+  --ok: #22c55e; --ok-soft: rgba(34,197,94,.14); --bad: #ef4444; --bad-soft: rgba(239,68,68,.14);
+  --warn: #f59e0b; --warn-soft: rgba(245,158,11,.14); --radius: 12px;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: "Segoe UI", system-ui, sans-serif; font-size: 14px; background: var(--bg); color: var(--text); min-height: 100%; }
+button, input, select { font: inherit; color: inherit; }
+a { color: #93c5fd; }
+.header { display: flex; align-items: center; gap: 12px; padding: 14px 20px; background: var(--surface); border-bottom: 1px solid var(--border); }
+.brand h1 { font-size: 16px; }
+.brand small { color: var(--muted); font-size: 12px; }
+.header-actions { margin-left: auto; display: flex; gap: 8px; }
+.wrap { max-width: 1180px; margin: 0 auto; padding: 20px; display: flex; flex-direction: column; gap: 16px; }
+.kpis { display: grid; grid-template-columns: repeat(6, 1fr); gap: 10px; }
+.kpi, .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); }
+.kpi { padding: 12px 14px; }
+.kpi span { display: block; color: var(--muted); font-size: 12px; }
+.kpi b { font-size: 22px; }
+.card { padding: 16px; }
+.card h2 { font-size: 15px; margin-bottom: 12px; }
+.row { display: grid; grid-template-columns: 280px 1fr; gap: 16px; }
+.form { display: flex; flex-direction: column; gap: 8px; margin-bottom: 14px; }
+label { font-size: 12px; color: var(--muted); display: flex; flex-direction: column; gap: 4px; }
+input, select { height: 34px; padding: 0 10px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface-2); outline: none; }
+input[type="checkbox"] { width: 16px; height: 16px; padding: 0; accent-color: var(--accent); }
+input:focus, select:focus { border-color: var(--accent); }
+.btn { height: 34px; padding: 0 12px; border-radius: 8px; border: 1px solid transparent; background: var(--accent); color: #fff; font-weight: 600; cursor: pointer; }
+.btn:disabled { opacity: .5; cursor: not-allowed; }
+.btn.ghost { background: var(--surface-2); border-color: var(--border); color: var(--text); }
+.btn.warn { background: #b45309; }
+.btn.bad { background: #b91c1c; }
+.btn.ok { background: #15803d; }
+.class-item, .student { display: flex; gap: 10px; align-items: center; padding: 8px 0; border-top: 1px solid var(--border); }
+.class-item button, .actions button { height: 28px; }
+.meta { color: var(--muted); font-size: 12px; }
+table { width: 100%; border-collapse: collapse; }
+th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+th { color: var(--muted); font-size: 12px; font-weight: 600; }
+.face { width: 36px; height: 36px; border-radius: 8px; object-fit: cover; background: var(--surface-3); }
+.pill { display: inline-block; padding: 2px 8px; border-radius: 99px; font-size: 12px; background: var(--surface-3); }
+.pill.ok { background: var(--ok-soft); color: #4ade80; }
+.pill.bad { background: var(--bad-soft); color: #fca5a5; }
+.pill.warn { background: var(--warn-soft); color: #fbbf24; }
+.toolbar { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; flex-wrap: wrap; }
+.toolbar input, .toolbar select { min-width: 160px; }
+.note { color: var(--muted); font-size: 12px; line-height: 1.45; }
+.banner { padding: 10px 12px; border-radius: 10px; background: var(--warn-soft); color: #fbbf24; }
+.banner.ok { background: var(--ok-soft); color: #4ade80; }
+.modal { position: fixed; inset: 0; z-index: 40; background: rgba(0,0,0,.55); display: none; place-items: center; padding: 12px; overflow: hidden; }
+.modal.show { display: grid; }
+.dialog { width: min(460px, calc(100vw - 24px)); min-width: 0; background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 16px; display: flex; flex-direction: column; gap: 10px; }
+.dialog.wide { width: min(1100px, calc(100vw - 24px)); max-width: calc(100vw - 24px); max-height: calc(100vh - 24px); overflow: hidden; }
+.sheet-tabs { display: flex; gap: 6px; flex-wrap: wrap; }
+.sheet-tabs button.active { background: var(--accent); }
+.report-table { width: max-content; min-width: 100%; border-collapse: collapse; font-size: 12px; }
+.report-table th, .report-table td { border-bottom: 1px solid var(--border); padding: 6px 8px; white-space: nowrap; }
+.report-scroll { overflow: auto; flex: 1; min-height: 0; min-width: 0; max-width: 100%; }
+.actions { display: flex; gap: 6px; }
+.pager { display: flex; gap: 6px; align-items: center; justify-content: flex-end; margin-top: 10px; flex-wrap: wrap; }
+.pager .meta { margin-right: auto; }
+.empty { color: var(--muted); padding: 8px 0; }
+.boot { position: fixed; inset: 0; z-index: 70; display: flex; align-items: center; justify-content: center; background: var(--bg); }
+.boot.hide { display: none; }
+.boot-card { display: flex; flex-direction: column; align-items: center; gap: 14px; }
+.spinner { width: 44px; height: 44px; border-radius: 50%; border: 3px solid var(--surface-3); border-top-color: var(--accent); animation: spin .75s linear infinite; }
+.boot p { color: var(--muted); font-size: 14px; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.toasts { position: fixed; right: 16px; bottom: 16px; z-index: 80; display: flex; flex-direction: column; gap: 8px; width: min(360px, calc(100vw - 32px)); pointer-events: none; }
+.toast { pointer-events: auto; padding: 12px 14px; border-radius: 10px; border: 1px solid var(--border); background: var(--surface-2); color: var(--text); box-shadow: 0 12px 32px rgba(0,0,0,.4); cursor: pointer; }
+.toast.ok { border-color: #166534; background: #052e16; color: #bbf7d0; }
+.toast.bad { border-color: #991b1b; background: #450a0a; color: #fecaca; }
+.toast.warn { border-color: #92400e; background: #451a03; color: #fde68a; }
+@media (max-width: 980px) {
+  .kpis { grid-template-columns: repeat(3, 1fr); }
+  .row { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+<div class="boot" id="boot" role="status" aria-live="polite">
+  <div class="boot-card">
+    <div class="spinner" aria-hidden="true"></div>
+    <p>Đang tải dữ liệu quản lý lớp…</p>
+  </div>
+</div>
+<div class="toasts" id="toasts"></div>
+<header class="header">
+  <div class="brand">
+    <h1>Quản lý lớp học</h1>
+    <small id="storageNote">Thêm lớp, học sinh và ảnh để điểm danh bằng ArcFace</small>
+  </div>
+  <div class="header-actions">
+    <button class="btn ghost" onclick="location.href='/'">Theo dõi lớp</button>
+  </div>
+</header>
+<main class="wrap">
+  <section class="kpis" id="kpis"></section>
+  <div id="galleryBanner"></div>
+  <section class="row">
+    <article class="card">
+      <h2>Lớp</h2>
+      <form class="form" id="classForm">
+        <label>Mã lớp<input name="class_id" required placeholder="LOP08" maxlength="32"></label>
+        <label>Ghi chú<input name="note" placeholder="Lớp 8A" maxlength="80"></label>
+        <button class="btn" type="submit">Thêm lớp</button>
+      </form>
+      <div id="classList"></div>
+    </article>
+    <article class="card">
+      <h2>Học sinh</h2>
+      <div class="toolbar">
+        <select id="filterClass"><option value="">Tất cả lớp</option></select>
+        <input id="filterName" placeholder="Tìm tên hoặc mã">
+        <button class="btn ok" id="btnAddStudent" type="button">Thêm học sinh</button>
+        <button class="btn ghost" id="btnTemplate" type="button">Tải file mẫu</button>
+        <button class="btn ghost" id="btnImport" type="button">Nhập Excel</button>
+        <input id="importFile" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" hidden>
+        <button class="btn warn" id="btnRebuild" type="button">Dựng lại gallery</button>
+      </div>
+      <p class="note">Chọn một lớp, tải file mẫu, thêm học sinh rồi nhập lại. Mã đã có trong lớp được cập nhật; mã để trống sẽ được đánh tiếp. Ảnh khuôn mặt thêm riêng trên trang này.</p>
+      <p class="note" id="rebuildNote">Ảnh mới chỉ được nhận diện sau khi dựng lại gallery. Phiên đang theo dõi giữ gallery cũ cho đến khi mở lại.</p>
+      <div style="overflow:auto">
+        <table>
+          <thead>
+            <tr><th></th><th>Mã</th><th>Họ tên</th><th>Lớp</th><th>Ảnh</th><th>Gallery</th><th></th></tr>
+          </thead>
+          <tbody id="studentBody"></tbody>
+        </table>
+      </div>
+    </article>
+  </section>
+  <section class="card">
+    <h2>Thống kê theo lớp</h2>
+    <table>
+      <thead><tr><th>Lớp</th><th>Sĩ số</th><th>Có ảnh</th><th>Thiếu ảnh</th><th>Đã vào gallery</th></tr></thead>
+      <tbody id="classStats"></tbody>
+    </table>
+  </section>
+  <section class="card">
+    <h2>Báo cáo điểm danh gần đây</h2>
+    <div class="toolbar">
+      <p class="note" style="margin:0;flex:1">Báo cáo lưu trên hệ thống. Bấm Xem để đọc trên trang này, hoặc Tải về khi cần file Excel.</p>
+      <button class="btn bad" id="btnDeleteReports" type="button" disabled>Xóa đã chọn</button>
+    </div>
+    <table>
+      <thead><tr>
+        <th><input id="reportCheckAll" type="checkbox" title="Chọn cả trang"></th>
+        <th>Thời điểm</th><th>Có mặt</th><th>Vắng</th><th>Tập trung</th><th>Không tập trung</th><th>Chưa đủ dữ liệu</th><th></th>
+      </tr></thead>
+      <tbody id="reports"></tbody>
+    </table>
+    <div class="pager" id="reportPager"></div>
+  </section>
+</main>
+
+<div class="modal" id="studentModal">
+  <form class="dialog" id="studentForm">
+    <h2 id="studentTitle">Thêm học sinh</h2>
+    <input type="hidden" name="original_id" value="">
+    <label>Lớp<select name="class_name" required></select></label>
+    <label>Họ và tên<input name="full_name" required maxlength="80"></label>
+    <label>Mã học sinh<input name="student_id" placeholder="Để trống sẽ tự đánh số" maxlength="32"></label>
+    <label>Giới tính
+      <select name="gioi_tinh">
+        <option value="">—</option><option>Nam</option><option>Nữ</option><option>Khác</option>
+      </select>
+    </label>
+    <label>Ngày sinh<input name="ngay_sinh" placeholder="15/03/2013" maxlength="20"></label>
+    <label>Ảnh khuôn mặt (nhìn thẳng, rõ mặt)<input name="files" type="file" accept="image/*" multiple></label>
+    <p class="note">Nên có ít nhất một ảnh chính diện. Có thể chọn nhiều ảnh.</p>
+    <div class="actions">
+      <button class="btn" type="submit">Lưu</button>
+      <button class="btn ghost" type="button" id="btnClose">Hủy</button>
+    </div>
+  </form>
+</div>
+
+<div class="modal" id="reportModal">
+  <div class="dialog wide">
+    <div class="actions" style="justify-content:space-between">
+      <h2 id="reportTitle" style="font-size:15px">Báo cáo</h2>
+      <div class="actions">
+        <a class="btn ghost" id="reportDownload" href="#">Tải về</a>
+        <button class="btn ghost" type="button" id="btnCloseReport">Đóng</button>
+      </div>
+    </div>
+    <div class="sheet-tabs" id="reportTabs"></div>
+    <div id="reportSummary" class="note"></div>
+    <div class="report-scroll"><table class="report-table" id="reportTable"></table></div>
+    <div class="pager" id="reportRowPager"></div>
+  </div>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+let classes = [];
+let students = [];
+let editing = false;
+
+function esc(s) {
+  return String(s ?? '').replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+function toast(message, kind) {
+  const node = document.createElement('div');
+  node.className = 'toast ' + (kind || 'ok');
+  node.textContent = message;
+  node.onclick = () => node.remove();
+  $('toasts').appendChild(node);
+  setTimeout(() => node.remove(), kind === 'bad' ? 5600 : 3400);
+}
+async function api(url, options) {
+  const res = await fetch(url, options);
+  let data = {};
+  try { data = await res.json(); } catch (e) {}
+  if (!res.ok) throw new Error(data.detail || data.error || ('Lỗi ' + res.status));
+  return data;
+}
+function pill(ok, yes, no) {
+  return ok ? `<span class="pill ok">${yes}</span>` : `<span class="pill bad">${no}</span>`;
+}
+
+function render(data) {
+  const cards = [
+    ['Lớp', data.classes],
+    ['Sĩ số', data.students],
+    ['Có ảnh', data.with_photo],
+    ['Thiếu ảnh', data.missing_photo],
+    ['Ảnh enroll', data.enroll_images],
+    ['Gallery', data.gallery_size],
+  ];
+  $('kpis').innerHTML = cards.map(([k, v]) => `<div class="kpi"><span>${k}</span><b>${v ?? '-'}</b></div>`).join('');
+  const banner = $('galleryBanner');
+  if (data.storage) {
+    $('storageNote').textContent = 'Đang lưu trên ' + data.storage + (data.database ? ' · ' + data.database : '');
+  }
+  if (data.gallery_ready) {
+    banner.innerHTML = '<div class="banner ok">Gallery khớp danh sách học sinh đã có ảnh. Có thể điểm danh.</div>';
+  } else if ((data.missing_from_gallery || []).length || (data.extra_in_gallery || []).length) {
+    const miss = (data.missing_from_gallery || []).join(', ');
+    banner.innerHTML = `<div class="banner">Gallery chưa khớp.${miss ? ' Chưa nhận diện được: ' + esc(miss) + '.' : ''} Bấm «Dựng lại gallery».</div>`;
+  } else banner.innerHTML = '';
+
+  classes = data.by_class || [];
+  $('classList').innerHTML = classes.map((c) => `
+    <div class="class-item">
+      <div style="flex:1"><b>${esc(c.class_id)}</b><div class="meta">${esc(c.note || '')} · ${c.students} HS · ${c.with_photo} có ảnh</div></div>
+      <button class="btn ghost bad" data-del-class="${esc(c.class_id)}" ${c.students ? 'disabled title="Còn học sinh"' : ''}>Xóa</button>
+    </div>`).join('') || '<div class="empty">Chưa có lớp</div>';
+
+  const filter = $('filterClass');
+  const current = filter.value;
+  filter.innerHTML = '<option value="">Tất cả lớp</option>' + classes.map((c) => `<option value="${esc(c.class_id)}">${esc(c.class_id)}</option>`).join('');
+  filter.value = current;
+  const classSelect = document.querySelector('#studentForm select[name="class_name"]');
+  classSelect.innerHTML = classes.map((c) => `<option value="${esc(c.class_id)}">${esc(c.class_id)}</option>`).join('');
+
+  $('classStats').innerHTML = classes.map((c) => `<tr>
+    <td>${esc(c.class_id)}${c.note ? ' · ' + esc(c.note) : ''}</td>
+    <td>${c.students}</td><td>${c.with_photo}</td><td>${c.missing_photo}</td><td>${c.in_gallery}</td>
+  </tr>`).join('') || '<tr><td colspan="5" class="empty">Chưa có lớp</td></tr>';
+
+}
+
+const REPORT_PAGE_SIZE = 8;
+const SHEET_PAGE_SIZE = 12;
+let reportPage = 1;
+
+function reportRows(items) {
+  return (items || []).map((r) => `<tr>
+    <td><input type="checkbox" data-report-check value="${esc(r.name)}"></td>
+    <td>${esc(r.modified)}</td><td>${r.present ?? '-'}</td><td>${r.absent ?? '-'}</td>
+    <td>${r.focus ?? '-'}</td><td>${r.unfocus ?? '-'}</td><td>${r.no_data ?? '-'}</td>
+    <td class="actions">
+      <button class="btn ghost" type="button" data-view="${esc(r.name)}">Xem</button>
+      <a class="btn ghost" href="${esc(r.download_url)}">Tải về</a>
+      <button class="btn ghost bad" type="button" data-del-report="${esc(r.name)}">Xóa</button>
+    </td>
+  </tr>`).join('');
+}
+
+function pagerHtml(page, pages, total, attr) {
+  const from = total ? (page - 1) * REPORT_PAGE_SIZE + 1 : 0;
+  const to = Math.min(total, page * REPORT_PAGE_SIZE);
+  return `<span class="meta">${total ? from + '–' + to + ' / ' + total + ' báo cáo' : 'Chưa có báo cáo'}</span>
+    <button class="btn ghost" type="button" ${attr}="${page - 1}" ${page <= 1 ? 'disabled' : ''}>Trước</button>
+    <span>${page}/${pages}</span>
+    <button class="btn ghost" type="button" ${attr}="${page + 1}" ${page >= pages ? 'disabled' : ''}>Sau</button>`;
+}
+
+async function loadReports(page) {
+  const data = await api('/api/admin/reports?page=' + (page || 1) + '&page_size=' + REPORT_PAGE_SIZE);
+  reportPage = data.page || 1;
+  $('reports').innerHTML = reportRows(data.items) || '<tr><td colspan="8" class="empty">Chưa có báo cáo</td></tr>';
+  $('reportPager').innerHTML = pagerHtml(reportPage, data.pages || 1, data.total || 0, 'data-report-page');
+  $('reportCheckAll').checked = false;
+  syncReportDelete();
+}
+
+function selectedReports() {
+  return [...document.querySelectorAll('#reports [data-report-check]:checked')].map((box) => box.value);
+}
+
+function syncReportDelete() {
+  const picked = selectedReports();
+  const boxes = document.querySelectorAll('#reports [data-report-check]');
+  const btn = $('btnDeleteReports');
+  btn.disabled = picked.length === 0;
+  btn.textContent = picked.length ? 'Xóa đã chọn (' + picked.length + ')' : 'Xóa đã chọn';
+  const all = $('reportCheckAll');
+  all.checked = boxes.length > 0 && picked.length === boxes.length;
+  all.indeterminate = picked.length > 0 && picked.length < boxes.length;
+}
+
+async function removeReports(names) {
+  if (!names.length) return;
+  const label = names.length === 1 ? 'báo cáo này' : names.length + ' báo cáo đã chọn';
+  if (!confirm('Xóa ' + label + '? Không khôi phục được.')) return;
+  const data = await api('/api/admin/reports', {
+    method: 'DELETE',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({names}),
+  });
+  if (reportView && names.includes(reportView.name)) $('reportModal').classList.remove('show');
+  await loadReports(reportPage);
+  toast(data.deleted ? 'Đã xóa ' + data.deleted + ' báo cáo.' : 'Không thấy báo cáo để xóa.', data.deleted ? 'ok' : 'warn');
+  return data;
+}
+
+function renderStudents() {
+  const cls = $('filterClass').value;
+  const q = $('filterName').value.trim().toLowerCase();
+  const rows = students.filter((s) => (!cls || s.class_name === cls) && (!q || `${s.full_name} ${s.student_id}`.toLowerCase().includes(q)));
+  $('studentBody').innerHTML = rows.map((s) => `<tr>
+    <td>${s.photo_url ? `<img class="face" src="${esc(s.photo_url)}?t=${s.enroll_count}" alt="">` : '<span class="face"></span>'}</td>
+    <td>${esc(s.student_id)}</td>
+    <td>${esc(s.full_name)}<div class="meta">${esc(s.gioi_tinh)} ${esc(s.ngay_sinh)}</div></td>
+    <td>${esc(s.class_name)}</td>
+    <td>${s.enroll_count ? `<span class="pill ok">${s.enroll_count} ảnh</span>` : '<span class="pill warn">Thiếu</span>'}</td>
+    <td>${s.in_gallery ? pill(true, 'Có', '') : '<span class="pill bad">Chưa</span>'}</td>
+    <td class="actions">
+      <button class="btn ghost" data-edit="${esc(s.student_id)}">Sửa</button>
+      <button class="btn ghost" data-photo="${esc(s.student_id)}">Thêm ảnh</button>
+      <button class="btn ghost bad" data-del="${esc(s.student_id)}">Xóa</button>
+    </td>
+  </tr>`).join('') || '<tr><td colspan="7" class="empty">Không có học sinh</td></tr>';
+}
+
+function whenImagesReady(root) {
+  const images = [...(root ? root.querySelectorAll('img') : [])];
+  if (!images.length) return Promise.resolve();
+  const pending = images.map((img) => img.complete ? Promise.resolve() : new Promise((resolve) => {
+    img.addEventListener('load', resolve, {once: true});
+    img.addEventListener('error', resolve, {once: true});
+  }));
+  return Promise.race([
+    Promise.all(pending),
+    new Promise((resolve) => setTimeout(resolve, 12000)),
+  ]);
+}
+
+async function load() {
+  const reportsTask = loadReports(reportPage);
+  const [ov, st] = await Promise.all([api('/api/admin/overview'), api('/api/admin/students')]);
+  render(ov);
+  students = st.students || [];
+  renderStudents();
+  try { await reportsTask; }
+  catch (err) {
+    $('reports').innerHTML = '<tr><td colspan="8" class="empty">' + esc(err.message) + '</td></tr>';
+    toast(err.message, 'bad');
+  }
+}
+
+$('classForm').onsubmit = async (e) => {
+  e.preventDefault();
+  const body = Object.fromEntries(new FormData(e.target));
+  try {
+    await api('/api/admin/classes', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
+    e.target.reset();
+    await load();
+    toast('Đã thêm lớp ' + (body.class_id || '') + '.');
+  } catch (err) { toast(err.message, 'bad'); }
+};
+
+$('classList').onclick = async (e) => {
+  const btn = e.target.closest('[data-del-class]');
+  if (!btn || btn.disabled) return;
+  if (!confirm('Xóa lớp ' + btn.dataset.delClass + '?')) return;
+  try {
+    await api('/api/admin/classes/' + encodeURIComponent(btn.dataset.delClass), {method:'DELETE'});
+    await load();
+    toast('Đã xóa lớp ' + btn.dataset.delClass + '.');
+  } catch (err) { toast(err.message, 'bad'); }
+};
+
+function openStudent(row) {
+  editing = !!row;
+  const form = $('studentForm');
+  form.reset();
+  $('studentTitle').textContent = row ? 'Sửa học sinh' : 'Thêm học sinh';
+  form.original_id.value = row ? row.student_id : '';
+  if (row) {
+    form.class_name.value = row.class_name;
+    form.full_name.value = row.full_name;
+    form.student_id.value = row.student_id;
+    form.student_id.readOnly = true;
+    form.gioi_tinh.value = row.gioi_tinh || '';
+    form.ngay_sinh.value = row.ngay_sinh || '';
+  } else {
+    form.student_id.readOnly = false;
+    if ($('filterClass').value) form.class_name.value = $('filterClass').value;
+  }
+  $('studentModal').classList.add('show');
+}
+$('btnAddStudent').onclick = () => openStudent(null);
+$('btnTemplate').onclick = () => {
+  const code = $('filterClass').value;
+  const url = '/api/admin/students/template' + (code ? ('?class_id=' + encodeURIComponent(code)) : '');
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = '';
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  toast(code ? ('Đã tải file mẫu của lớp ' + code + '.') : 'Đã tải file mẫu trống.');
+};
+$('btnImport').onclick = () => {
+  if (!$('filterClass').value) {
+    toast('Chọn một lớp ở bộ lọc rồi hãy nhập Excel.', 'bad');
+    return;
+  }
+  $('importFile').value = '';
+  $('importFile').click();
+};
+$('importFile').onchange = async () => {
+  const file = $('importFile').files && $('importFile').files[0];
+  const code = $('filterClass').value;
+  if (!file || !code) return;
+  const body = new FormData();
+  body.append('file', file);
+  try {
+    const res = await api('/api/admin/classes/' + encodeURIComponent(code) + '/students/import', {method: 'POST', body});
+    await load();
+    $('filterClass').value = code;
+    renderStudents();
+    toast('Đã nhập ' + res.class_id + ': thêm ' + res.created + ', cập nhật ' + res.updated + ', giữ nguyên ' + res.unchanged + '.');
+  } catch (err) { toast(err.message, 'bad'); }
+};
+$('btnClose').onclick = () => $('studentModal').classList.remove('show');
+
+$('studentForm').onsubmit = async (e) => {
+  e.preventDefault();
+  const form = e.target;
+  const fd = new FormData(form);
+  try {
+    if (editing) {
+      await api('/api/admin/students/' + encodeURIComponent(form.original_id.value), {
+        method: 'PATCH', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({
+          full_name: fd.get('full_name'), class_name: fd.get('class_name'),
+          gioi_tinh: fd.get('gioi_tinh'), ngay_sinh: fd.get('ngay_sinh'),
+        }),
+      });
+      if (fd.getAll('files').some((f) => f && f.size)) {
+        const photos = new FormData();
+        for (const file of fd.getAll('files')) if (file && file.size) photos.append('files', file);
+        await api('/api/admin/students/' + encodeURIComponent(form.original_id.value) + '/photos', {method:'POST', body: photos});
+      }
+    } else {
+      await api('/api/admin/students', {method:'POST', body: fd});
+    }
+    $('studentModal').classList.remove('show');
+    await load();
+    toast(editing ? 'Đã cập nhật học sinh.' : 'Đã thêm học sinh.');
+  } catch (err) { toast(err.message, 'bad'); }
+};
+
+$('studentBody').onclick = async (e) => {
+  const edit = e.target.closest('[data-edit]');
+  const del = e.target.closest('[data-del]');
+  const photo = e.target.closest('[data-photo]');
+  if (edit) {
+    openStudent(students.find((s) => s.student_id === edit.dataset.edit));
+    return;
+  }
+  if (photo) {
+    const input = document.createElement('input');
+    input.type = 'file'; input.accept = 'image/*'; input.multiple = true;
+    input.onchange = async () => {
+      const body = new FormData();
+      for (const file of input.files) body.append('files', file);
+      try {
+        await api('/api/admin/students/' + encodeURIComponent(photo.dataset.photo) + '/photos', {method:'POST', body});
+        await load();
+        toast('Đã thêm ảnh cho ' + photo.dataset.photo + '.');
+      } catch (err) { toast(err.message, 'bad'); }
+    };
+    input.click();
+    return;
+  }
+  if (del) {
+    const sid = del.dataset.del;
+    if (!confirm('Xóa học sinh ' + sid + ' và ảnh khuôn mặt?')) return;
+    try {
+      await api('/api/admin/students/' + encodeURIComponent(sid), {method:'DELETE'});
+      await load();
+      toast('Đã xóa học sinh ' + sid + '.');
+    } catch (err) { toast(err.message, 'bad'); }
+  }
+};
+
+$('filterClass').onchange = renderStudents;
+$('filterName').oninput = renderStudents;
+$('btnRebuild').onclick = async () => {
+  const btn = $('btnRebuild');
+  btn.disabled = true;
+  $('rebuildNote').textContent = 'Đang dựng gallery từ ảnh enroll. Có thể mất vài phút...';
+  try {
+    const data = await api('/api/admin/rebuild-gallery', {method:'POST'});
+    $('rebuildNote').textContent = 'Đã dựng gallery cho ' + data.students + ' học sinh. Mở phiên theo dõi mới để áp dụng.';
+    toast('Đã dựng gallery cho ' + data.students + ' học sinh.');
+    await load();
+  } catch (err) {
+    $('rebuildNote').textContent = err.message;
+    toast(err.message, 'bad');
+  } finally { btn.disabled = false; }
+};
+
+let reportView = null;
+let sheetIndex = 0;
+let sheetPage = 1;
+
+function showReportSheet(index, page) {
+  const sheet = (reportView && reportView.sheets || [])[index];
+  if (!sheet) return;
+  sheetIndex = index;
+  document.querySelectorAll('#reportTabs button').forEach((btn, i) => btn.classList.toggle('active', i === index));
+  const summary = sheet.summary || [];
+  $('reportSummary').innerHTML = summary.map((item) => `<div><b>${esc(item.label)}:</b> ${esc(item.value)}</div>`).join('');
+  const rows = sheet.rows || [];
+  const pages = Math.max(1, Math.ceil(rows.length / SHEET_PAGE_SIZE));
+  sheetPage = Math.min(pages, Math.max(1, page || 1));
+  const start = (sheetPage - 1) * SHEET_PAGE_SIZE;
+  const head = '<tr>' + (sheet.headers || []).map((h) => `<th>${esc(h)}</th>`).join('') + '</tr>';
+  const body = rows.slice(start, start + SHEET_PAGE_SIZE).map((row) => '<tr>' + row.map((cell) => `<td>${esc(cell)}</td>`).join('') + '</tr>').join('');
+  $('reportTable').innerHTML = head + body;
+  const from = rows.length ? start + 1 : 0;
+  const to = Math.min(rows.length, start + SHEET_PAGE_SIZE);
+  $('reportRowPager').innerHTML = `<span class="meta">${rows.length ? from + '–' + to + ' / ' + rows.length + ' dòng' : ''}</span>
+    <button class="btn ghost" type="button" data-row-page="${sheetPage - 1}" ${sheetPage <= 1 ? 'disabled' : ''}>Trước</button>
+    <span>${sheetPage}/${pages}</span>
+    <button class="btn ghost" type="button" data-row-page="${sheetPage + 1}" ${sheetPage >= pages ? 'disabled' : ''}>Sau</button>`;
+}
+
+async function openReport(name) {
+  const btn = document.querySelector('#reports [data-view="' + CSS.escape(name) + '"]');
+  if (btn) { btn.disabled = true; btn.textContent = 'Đang mở...'; }
+  try {
+    reportView = await api('/api/admin/reports/' + encodeURIComponent(name) + '/preview');
+    $('reportTitle').textContent = (reportView.modified || '') + ' · ' + name;
+    $('reportDownload').href = reportView.download_url || ('/api/admin/reports/' + encodeURIComponent(name));
+    $('reportTabs').innerHTML = (reportView.sheets || []).map((sheet, i) =>
+      `<button type="button" class="btn ghost" data-sheet="${i}">${esc(sheet.name)}</button>`).join('');
+    showReportSheet(0);
+    $('reportModal').classList.add('show');
+  } catch (err) { toast(err.message, 'bad'); }
+  finally { if (btn) { btn.disabled = false; btn.textContent = 'Xem'; } }
+}
+
+$('btnCloseReport').onclick = () => $('reportModal').classList.remove('show');
+$('reportTabs').onclick = (e) => {
+  const btn = e.target.closest('[data-sheet]');
+  if (btn) showReportSheet(Number(btn.dataset.sheet), 1);
+};
+$('reportRowPager').onclick = (e) => {
+  const btn = e.target.closest('[data-row-page]');
+  if (btn && !btn.disabled) showReportSheet(sheetIndex, Number(btn.dataset.rowPage));
+};
+$('reportPager').onclick = (e) => {
+  const btn = e.target.closest('[data-report-page]');
+  if (!btn || btn.disabled) return;
+  loadReports(Number(btn.dataset.reportPage)).catch((err) => toast(err.message, 'bad'));
+};
+document.getElementById('reports').onclick = (e) => {
+  if (e.target.closest('[data-report-check]')) {
+    syncReportDelete();
+    return;
+  }
+  const del = e.target.closest('[data-del-report]');
+  if (del) {
+    removeReports([del.dataset.delReport]).catch((err) => toast(err.message, 'bad'));
+    return;
+  }
+  const btn = e.target.closest('[data-view]');
+  if (btn) openReport(btn.dataset.view);
+};
+$('reportCheckAll').onchange = () => {
+  document.querySelectorAll('#reports [data-report-check]').forEach((box) => { box.checked = $('reportCheckAll').checked; });
+  syncReportDelete();
+};
+$('btnDeleteReports').onclick = () => {
+  removeReports(selectedReports()).catch((err) => toast(err.message, 'bad'));
+};
+
+load()
+  .catch((err) => {
+    $('kpis').innerHTML = '<div class="banner">' + esc(err.message) + '</div>';
+    toast(err.message, 'bad');
+  })
+  .finally(async () => {
+    await whenImagesReady($('studentBody'));
+    $('boot').classList.add('hide');
+  });
+</script>
+</body>
+</html>

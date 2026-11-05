@@ -25,7 +25,7 @@ from pathlib import Path
 BASE_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(BASE_DIR))
 
-from core.ernu import BEHAVIOR_TO_B, overlap_sec
+from core.ernu import BEHAVIOR_TO_B, DEFAULT_PROXY_MAPPING, overlap_sec, proxy_from_label
 
 
 def _read_sheet(path: Path, name: str) -> list[dict]:
@@ -219,6 +219,48 @@ def engagement_alignment(
         elif best in ("N", "U"):
             n_u += 1
 
+    # Proxy alignment: máy E→ON, R→PENDING (không tự OFF); so với GT ON/OFF/UNCERTAIN
+    proxy_on_hit = proxy_on_total = 0
+    pending_vs_off = pending_vs_unc = pending_total = 0
+    for g in eng_gt:
+        gt = _norm_gt_label(g.get("gt_label"))
+        if gt is None:
+            continue
+        sid = str(g.get("student_id") or "")
+        s = _sec(g, "start_sec")
+        if s is None:
+            continue
+        best = None
+        best_proxy = None
+        best_ov = 0.0
+        ge = _sec(g, "end_sec") or (s + 10)
+        for p in predicted:
+            if str(p.get("student_id") or "") != sid:
+                continue
+            ps, pe = _sec(p, "start_sec"), _sec(p, "end_sec")
+            if ps is None or pe is None:
+                continue
+            ov = overlap_sec(s, ge, ps, pe)
+            if ov > best_ov:
+                best_ov = ov
+                best = str(p.get("pred_label") or "").upper()
+                raw_px = str(p.get("proxy_label") or "").strip().upper()
+                best_proxy = raw_px if raw_px in (
+                    "ON", "OFF", "PENDING", "UNCERTAIN", "NO_DATA"
+                ) else proxy_from_label(best, False, DEFAULT_PROXY_MAPPING)
+        if best is None or best_ov <= 0:
+            continue
+        if best_proxy == "ON":
+            proxy_on_total += 1
+            if gt == "ON":
+                proxy_on_hit += 1
+        elif best_proxy == "PENDING":
+            pending_total += 1
+            if gt == "OFF":
+                pending_vs_off += 1
+            elif gt == "UNCERTAIN":
+                pending_vs_unc += 1
+
     return {
         "windows_compared": compared,
         "E_total": e_total,
@@ -232,6 +274,19 @@ def engagement_alignment(
         "ON_total": on_total,
         "ON_missed": on_missed,
         "ON_miss_rate": None if not on_total else round(on_missed / on_total, 3),
+        "proxy": {
+            "mapping": dict(DEFAULT_PROXY_MAPPING),
+            "ON_total": proxy_on_total,
+            "ON_and_GT_ON": proxy_on_hit,
+            "ON_precision_vs_GT": None if not proxy_on_total else round(proxy_on_hit / proxy_on_total, 3),
+            "PENDING_total": pending_total,
+            "PENDING_vs_GT_OFF": pending_vs_off,
+            "PENDING_vs_GT_UNCERTAIN": pending_vs_unc,
+            "note": (
+                "PENDING (từ R) không được tính là OFF tự động. "
+                "OFF hệ thống chỉ hợp lệ sau review-confirm."
+            ),
+        },
         "disagreements": disagreements,
     }
 
@@ -326,13 +381,17 @@ def write_quality_review(path: Path, disagreements: list[dict], reviewer: str = 
     ws.title = "QUALITY_REVIEW"
     headers = [
         "video_id", "student_id", "start_sec", "end_sec", "issue",
-        "gt_label", "pred_label", "reviewer", "resolution", "note",
+        "gt_label", "pred_label", "proxy_label", "reviewer", "resolution", "note",
     ]
     ws.append(headers)
     for d in disagreements:
+        pred = d.get("pred_label")
+        proxy = d.get("proxy_label") or (
+            proxy_from_label(str(pred or ""), False, DEFAULT_PROXY_MAPPING) if pred else ""
+        )
         ws.append([
             d.get("video_id"), d.get("student_id"), d.get("start_sec"), d.get("end_sec"),
-            d.get("issue"), d.get("gt_label"), d.get("pred_label"),
+            d.get("issue"), d.get("gt_label"), pred, proxy,
             reviewer, "CHUA_XU_LY", "Sinh tự động từ eval_ernu — không phải kết luận cuối",
         ])
     path.parent.mkdir(parents=True, exist_ok=True)

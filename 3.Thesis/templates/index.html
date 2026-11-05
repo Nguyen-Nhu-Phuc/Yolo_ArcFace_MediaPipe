@@ -251,7 +251,7 @@ svg { flex-shrink: 0; }
   <div class="source-bar">
     <input id="videoSource" value="" placeholder="rtsp://user@ddns:15554/... hoặc đường dẫn file" title="rtsp://user@hostname:cổng/... = camera IP hoặc DDNS; hoặc đường dẫn file video">
     <button class="btn btn-connect" id="btnConnect" onclick="connect()">Kết nối</button>
-    <button class="btn btn-cut" id="btnCut" onclick="cutSession()" disabled title="Lưu Excel phiên này và dừng ghi. Video hoặc camera vẫn chạy để chờ tiết sau.">Ngắt phiên</button>
+    <button class="btn btn-cut" id="btnCut" onclick="cutSession()" disabled title="Lưu báo cáo phiên này lên hệ thống và dừng ghi. Không tải file về máy.">Ngắt phiên</button>
     <button class="btn btn-start" id="btnStart" onclick="startSession()" disabled title="Bắt đầu ghi phiên mới sau khoảng giao thoa giữa hai tiết.">Bắt đầu phiên</button>
     <button class="btn btn-stop" id="btnStop" onclick="disconnect()" disabled>Dừng</button>
   </div>
@@ -267,6 +267,7 @@ svg { flex-shrink: 0; }
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M8 13l4 5M12 13l-4 5"/></svg>
       Xuất Excel
     </button>
+    <button class="btn btn-ghost" onclick="location.href='/admin'" title="Thêm lớp, học sinh và xem thống kê điểm danh">Quản lý lớp</button>
     <span class="status disconnected" id="statusBadge">Chưa kết nối</span>
   </div>
 </header>
@@ -282,7 +283,7 @@ svg { flex-shrink: 0; }
     <img id="frameImg" alt="" style="display:none">
     <div class="hud">
       <span>Trên khung: <b id="hCount">-</b></span>
-      <span>Cần xem: <b id="hFocused">-</b></span>
+      <span>Cần xem (khung B4/B5): <b id="hFocused">-</b></span>
       <span>Đã gán tên: <b id="hNamed">-</b></span>
     </div>
     <div class="legend-overlay" id="legendOverlay">
@@ -299,7 +300,7 @@ svg { flex-shrink: 0; }
   <aside class="sidebar">
     <div class="kpis">
       <div class="card kpi" style="--kpi: var(--info)"><div class="label">Trên khung</div><div class="value" id="studentCount">-</div></div>
-      <div class="card kpi" style="--kpi: var(--bad)"><div class="label">Cần xem</div><div class="value" id="focusedCount">-</div></div>
+      <div class="card kpi" style="--kpi: var(--bad)"><div class="label">Cần xem (khung)</div><div class="value" id="focusedCount" title="Số người trên khung đang có tín hiệu B4/B5 — không phải điểm tập trung">-</div></div>
     </div>
 
     <div class="card meta-card">
@@ -369,6 +370,15 @@ svg { flex-shrink: 0; }
           <div class="mini"><div class="label">P_U (thiếu quan sát)</div><div class="value" id="attPU">-</div></div>
           <div class="mini"><div class="label">BEEI (phụ)</div><div class="value" id="attBEEI">-</div></div>
         </div>
+        <div class="lg-section">Kết luận tự động (hết phiên / đang tổng hợp)</div>
+        <div class="att-grid groups">
+          <div class="mini"><div class="label">Tập trung</div><div class="value" id="attFocusOn">-</div></div>
+          <div class="mini review"><div class="label">Không tập trung</div><div class="value" id="attFocusOff">-</div></div>
+          <div class="mini"><div class="label">Chưa đủ dữ liệu</div><div class="value" id="attFocusNA">-</div></div>
+          <div class="mini"><div class="label">P_ON</div><div class="value" id="attPON">-</div></div>
+          <div class="mini review"><div class="label">P_OFF</div><div class="value" id="attPOFF">-</div></div>
+          <div class="mini"><div class="label">P_UNCERTAIN</div><div class="value" id="attPUnc">-</div></div>
+        </div>
         <div class="att-grid groups">
           <div class="mini"><div class="label">Tín hiệu B1/B2 (giây)</div><div class="value" id="attActivity">-</div></div>
           <div class="mini review"><div class="label">Tín hiệu B4/B5 (giây)</div><div class="value" id="attReview">-</div></div>
@@ -376,7 +386,7 @@ svg { flex-shrink: 0; }
         </div>
         <div class="lg-section">Tỷ lệ khung có tín hiệu cần xem (B4/B5) theo phút</div>
         <div class="trend" id="attTrend"><span class="empty">Chưa có dữ liệu</span></div>
-        <div class="lg-section">Có mặt — P_R / tín hiệu cần xem xếp trước</div>
+        <div class="lg-section">Có mặt — kết luận tập trung xếp trước</div>
         <div id="attList"><span class="empty">Chưa nhận diện được học sinh nào</span></div>
         <div class="lg-section">Vắng / chưa nhận diện (<span id="attAbsentN">0</span>)</div>
         <div class="chips" id="attAbsentList"><span class="empty">—</span></div>
@@ -683,6 +693,9 @@ function renderSummary(data) {
     setText('attPN', '—');
     setText('attPU', pct(ernu.P_U));
     setText('attBEEI', '—');
+    setText('attPON', '—');
+    setText('attPOFF', '—');
+    setText('attPUnc', '—');
   } else {
     setText('attCoverage', pct(ernu.C));
     setText('attPE', pct(ernu.P_E));
@@ -691,24 +704,33 @@ function renderSummary(data) {
     setText('attPU', pct(ernu.P_U));
     const beeiTxt = ernu.BEEI != null ? String(ernu.BEEI) : '—';
     setText('attBEEI', ernu.publishable === false ? `${beeiTxt} (C thấp)` : beeiTxt);
+    setText('attPON', pct(ernu.P_ON));
+    setText('attPOFF', pct(ernu.P_OFF));
+    setText('attPUnc', pct(ernu.P_UNCERTAIN));
   }
+  setText('attFocusOn', ernu.n_tap_trung != null ? String(ernu.n_tap_trung) : '—');
+  setText('attFocusOff', ernu.n_khong_tap_trung != null ? String(ernu.n_khong_tap_trung) : '—');
+  setText('attFocusNA', ernu.n_chua_du_du_lieu != null ? String(ernu.n_chua_du_du_lieu) : '—');
 
   document.getElementById('attTrend').innerHTML = (data.timeline || []).length
     ? trendSvg(data.timeline)
     : '<span class="empty">Chưa có dữ liệu</span>';
 
+  const verdictRank = { 'Không tập trung': 0, 'Chưa đủ dữ liệu': 1, 'Tập trung': 2 };
   document.getElementById('attList').innerHTML = present.length
     ? present.slice()
       .sort((a, b) => {
-        const ar = (a.ernu && a.ernu.P_R) || 0, br = (b.ernu && b.ernu.P_R) || 0;
-        if (br !== ar) return br - ar;
-        return (b.review_secs || 0) - (a.review_secs || 0) || (b.unknown_secs || 0) - (a.unknown_secs || 0);
+        const av = verdictRank[(a.ernu && a.ernu.focus_verdict) || ''] ?? 3;
+        const bv = verdictRank[(b.ernu && b.ernu.focus_verdict) || ''] ?? 3;
+        if (av !== bv) return av - bv;
+        const as = (a.ernu && a.ernu.focus_score) || 0, bs = (b.ernu && b.ernu.focus_score) || 0;
+        return as - bs;
       })
       .map(s => {
         const e = s.ernu || {};
-        const cls = (e.P_R || 0) > 0 || (s.review_secs || 0) > 0
-          ? 'review'
-          : ((e.P_E || 0) > 0 || (s.activity_secs || 0) > 0 ? 'activity' : 'clear');
+        const verdict = e.focus_verdict || 'Chưa đủ dữ liệu';
+        const cls = verdict === 'Không tập trung' ? 'review'
+          : (verdict === 'Tập trung' ? 'activity' : 'clear');
         const dot = onFrameIds.has(s.student_id) ? '<span class="on-frame" title="Đang trên khung"></span>' : '';
         const tags = []
           .concat(s.review || [], s.activity || [], s.neutral || [], s.posture || [])
@@ -717,26 +739,19 @@ function renderSummary(data) {
               : ((s.posture || []).includes(b) ? 'posture' : 'activity');
             return `<span class="tag ${kind}" title="${esc(b.name)}: ${b.count} lần, ${b.secs} giây">${esc(b.name)} ${fmtSecs(b.secs)}</span>`;
           }).join('');
-        const bits = [];
-        if (e.data_status === 'Chưa đủ dữ liệu') {
-          bits.push('ERNU: chưa đủ dữ liệu');
-        } else if (e.C != null) {
-          bits.push(`C ${e.C}%`);
-          if (e.P_E != null) bits.push(`E ${e.P_E}%`);
-          if (e.P_R != null) bits.push(`R ${e.P_R}%`);
-          if (e.P_N != null) bits.push(`N ${e.P_N}%`);
-          if (e.P_U != null) bits.push(`U ${e.P_U}%`);
-          if (e.BEEI != null) bits.push(`BEEI ${e.BEEI}`);
-        }
+        const bits = [`<b>${esc(verdict)}</b>`];
+        if (e.focus_score != null) bits.push(`điểm ${e.focus_score}`);
+        if (e.C != null) bits.push(`C ${e.C}%`);
+        if (e.P_ON != null) bits.push(`ON ${e.P_ON}%`);
+        if (e.P_OFF != null) bits.push(`OFF ${e.P_OFF}%`);
+        if (e.BEEI != null) bits.push(`BEEI ${e.BEEI}`);
         if (s.review_secs) bits.push(`B4/B5 ${fmtSecs(s.review_secs)}`);
         if (s.activity_secs) bits.push(`B1/B2 ${fmtSecs(s.activity_secs)}`);
-        if (s.unknown_secs) bits.push(`Thiếu pose ${fmtSecs(s.unknown_secs)}`);
-        if (s.first_seen) bits.push(`vào khung ${esc(s.first_seen)}`);
         return '<div class="student-row">' +
           `<div class="id-badge ${cls}">${esc(boxCode(s))}</div>` +
           '<div class="info">' +
             `<div class="name">${esc(s.name || s.student_id)}${dot}</div>` +
-            `<div class="att-meta">${bits.join(' · ') || 'Chưa ghi nhận hành vi'}</div>` +
+            `<div class="att-meta">${bits.join(' · ')}</div>` +
             (tags ? `<div class="reasons">${tags}</div>` : '') +
           '</div>' +
         '</div>';
@@ -751,10 +766,9 @@ function renderSummary(data) {
   document.getElementById('attNote').textContent =
     (data.unknown_tracks ? `${data.unknown_tracks} người trên khung chưa nhận diện được mặt (chưa tính vào có mặt). ` : '') +
     (interp ? interp + ' ' : '') +
-    'E/R/N/U là nhãn cửa sổ 10 giây theo bộ tiêu chí ERNU — không phải điểm tập trung nhận thức. ' +
-    'BEEI chỉ là chỉ số phụ; khi coverage thấp không dùng đơn độc / không xếp hạng học sinh. ' +
-    'Mặc định ngữ cảnh A1 nếu chưa nạp ACTIVITY_CONTEXT (biến ERNU_ACTIVITY_CONTEXT hoặc /api/ernu/activity-context). ' +
-    'Sĩ số theo danh sách gallery ArcFace.';
+    'Máy tự kết luận theo thời gian đã nhận diện từng HS (không đòi bao phủ cả video). ' +
+    'Viết bài/giơ tay → tập trung; gục bàn → không tập trung. ' +
+    `Điểm ≥ ${ernu.focus_threshold ?? 50} → «Tập trung». Cần ≥ ~20s dữ liệu hợp lệ. Excel: focus_verdict.`;
 }
 
 function renderStats(data) {
@@ -859,14 +873,6 @@ function connect(cameraId) {
         if (data.report_url) {
           reportUrl = data.report_url;
           document.getElementById('btnExcel').disabled = false;
-        }
-        if (data.closed_report_url) {
-          const a = document.createElement('a');
-          a.href = data.closed_report_url;
-          a.download = '';
-          document.body.appendChild(a);
-          a.click();
-          a.remove();
         }
         return;
       }
@@ -1149,7 +1155,7 @@ function clearSessionBoard() {
 function cutSession() {
   if (!ws || ws.readyState !== 1 || betweenSessions) return;
   document.getElementById('btnCut').disabled = true;
-  log('Đang ngắt phiên, lưu Excel...');
+  log('Đang ngắt phiên, lưu báo cáo lên hệ thống...');
   ws.send(JSON.stringify({ action: 'cut' }));
 }
 

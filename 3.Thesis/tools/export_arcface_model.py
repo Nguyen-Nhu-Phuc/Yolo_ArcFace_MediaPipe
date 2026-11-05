@@ -133,7 +133,7 @@ def export_gallery(dataset_dir: Path, out_dir: Path) -> dict:
     class_dirs = sorted(p for p in faces_root.iterdir() if p.is_dir() and not p.name.startswith("_"))
     t0 = time.time()
     for class_dir in class_dirs:
-        for student_dir in sorted(class_dir.glob("HS*")):
+        for student_dir in sorted(p for p in class_dir.iterdir() if p.is_dir() and not p.name.startswith(("_", "."))):
             sources: list[tuple[Path, float]] = []
             for split_name in ("enroll", "test"):
                 split_dir = student_dir / split_name

@@ -369,9 +369,9 @@ def test_ernu_matrix_and_metrics() -> list[dict]:
     out = []
     out.append(_ok("ER01_B1_A1_E", matrix_label("B1", "A1") == "E", matrix_label("B1", "A1")))
     out.append(_ok("ER02_B2_A2_E", matrix_label("B2", "A2") == "E", matrix_label("B2", "A2")))
-    out.append(_ok("ER03_B2_A1_N", matrix_label("B2", "A1") == "N", matrix_label("B2", "A1")))
+    out.append(_ok("ER03_B2_A1_E_auto", matrix_label("B2", "A1") == "E", matrix_label("B2", "A1")))
     out.append(_ok("ER04_B3_always_N", matrix_label("B3", "A5") == "N", matrix_label("B3", "A5")))
-    out.append(_ok("ER05_B4_A1_R", matrix_label("B4", "A1") == "R", matrix_label("B4", "A1")))
+    out.append(_ok("ER05_B4_A1_N", matrix_label("B4", "A1") == "N", matrix_label("B4", "A1")))
     out.append(_ok("ER06_B4_A2_N", matrix_label("B4", "A2") == "N", matrix_label("B4", "A2")))
     out.append(_ok("ER07_B5_A3_R", matrix_label("B5", "A3") == "R", matrix_label("B5", "A3")))
     out.append(_ok(
@@ -532,6 +532,71 @@ def test_ernu_matrix_and_metrics() -> list[dict]:
         unc.pred_label == "N" and unc.activity_code == "CHUA_XAC_MINH",
         f"{unc.pred_label} act={unc.activity_code}",
     ))
+
+    # Proxy tự động: E→ON, R→OFF; hết phiên focus_verdict
+    from core.ernu import compute_focus_verdict, proxy_from_label
+    from core.config import ErnuConfig as _EC, DEFAULT_ERNU_RULES
+
+    out.append(_ok("ER37_proxy_E_ON", proxy_from_label("E") == "ON", proxy_from_label("E")))
+    out.append(_ok("ER38_proxy_R_OFF_auto", proxy_from_label("R") == "OFF", proxy_from_label("R")))
+    out.append(_ok("ER40_low_proxy_NO_DATA", low.proxy_label == "NO_DATA", low.proxy_label))
+    out.append(_ok("ER41_conflict_proxy_ON", conflict.proxy_label == "ON", conflict.proxy_label))
+
+    rw = WindowLabel("V", "S01", 0, 10, "A1", ["B5"], 1.0, "R", "review", False, "ernu-v1")
+    out.append(_ok("ER42_R_default_OFF", rw.proxy_label == "OFF", rw.proxy_label))
+
+    out.append(_ok("ER44_ex5_TON", abs(m.T_ON - 180) < 1e-6, f"T_ON={m.T_ON}"))
+    out.append(_ok("ER45_ex5_TOFF", abs(m.T_OFF - 50) < 1e-6, f"T_OFF={m.T_OFF}"))
+    out.append(_ok("ER46_ex5_TNO_DATA", abs(m.T_NO_DATA - 30) < 1e-6, f"T_NO_DATA={m.T_NO_DATA}"))
+    out.append(_ok(
+        "ER47_ex5_verdict_tap_trung",
+        m.focus_verdict == "Tập trung" and m.focus_score == 74.1,
+        f"{m.focus_verdict} score={m.focus_score}",
+    ))
+
+    # Load rules JSON (R→OFF, B2→E mọi A)
+    loaded = _EC.load_rules(DEFAULT_ERNU_RULES)
+    out.append(_ok(
+        "ER48_load_rules_json",
+        loaded.rules_version == "ernu-v1" and loaded.window_sec == 10.0 and loaded.c_min == 0.70,
+        f"ver={loaded.rules_version} win={loaded.window_sec} c={loaded.c_min}",
+    ))
+    out.append(_ok(
+        "ER49_load_matrix_B2_A1",
+        (loaded.matrix.get("B2") or {}).get("A1") == "E",
+        str(loaded.matrix.get("B2")),
+    ))
+    out.append(_ok(
+        "ER50_load_proxy_mapping",
+        (loaded.proxy_mapping or {}).get("R") == "OFF",
+        str(loaded.proxy_mapping),
+    ))
+
+    # Session: gục bàn → OFF → Không tập trung
+    _, metrics_c, class_c = analyze_session(
+        video_id="VID_R",
+        duration_sec=10.0,
+        student_ids=["S01"],
+        behaviors=[BehaviorInterval("S01", "Gục xuống bàn", 0, 8)],
+        observations=[ObservationInterval("S01", 0.0, 10.0)],
+        cfg=cfg,
+    )
+    out.append(_ok(
+        "ER51_session_auto_OFF",
+        metrics_c[0].T_OFF > 0
+        and metrics_c[0].focus_verdict == "Không tập trung"
+        and any(w.proxy_label == "OFF" for w in metrics_c[0].windows),
+        f"verdict={metrics_c[0].focus_verdict} T_OFF={metrics_c[0].T_OFF}",
+    ))
+    out.append(_ok(
+        "ER52_class_counts",
+        class_c.get("n_khong_tap_trung", 0) >= 1,
+        str({k: class_c.get(k) for k in ("n_tap_trung", "n_khong_tap_trung", "n_chua_du_du_lieu")}),
+    ))
+    v, sc = compute_focus_verdict(
+        publishable=True, T_valid=100, T_ON=80, T_OFF=20, BEEI=80.0, focus_threshold=50,
+    )
+    out.append(_ok("ER53_verdict_fn", v == "Tập trung" and sc == 80.0, f"{v} {sc}"))
     return out
 
 

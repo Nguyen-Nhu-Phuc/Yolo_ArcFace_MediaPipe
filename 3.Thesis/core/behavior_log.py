@@ -168,10 +168,42 @@ class BehaviorRecorder:
         # Khoảng quan sát hợp lệ theo student_id (posed + known) — dùng cho coverage ERNU
         self._obs_open: dict[str, list[float]] = {}  # sid → [start_sec, last_sec]
         self._obs_closed: list[ObservationInterval] = []
+        # Xác nhận xem lại: [{student_id, start_sec, end_sec, confirmed_off}, ...]
+        self.review_confirmations: list[dict] = []
         self.first_frame: int | None = None
         self.last_frame = 0
         self.first_wall = 0.0
         self.last_wall = 0.0
+
+    def add_review_confirmation(
+        self,
+        student_id: str,
+        start_sec: float,
+        end_sec: float,
+        confirmed_off: bool = True,
+    ) -> dict:
+        """Ghi xác nhận OFF (hoặc hủy) cho cửa sổ R; không đổi nhãn E/R/N/U."""
+        row = {
+            "student_id": str(student_id),
+            "start_sec": float(start_sec),
+            "end_sec": float(end_sec),
+            "confirmed_off": bool(confirmed_off),
+        }
+        with self._lock:
+            # Thay bản ghi chồng cùng HS + khoảng gần giống
+            kept = []
+            for c in self.review_confirmations:
+                if (
+                    str(c.get("student_id")) == row["student_id"]
+                    and abs(float(c["start_sec"]) - row["start_sec"]) < 0.05
+                    and abs(float(c["end_sec"]) - row["end_sec"]) < 0.05
+                ):
+                    continue
+                kept.append(c)
+            kept.append(row)
+            self.review_confirmations = kept
+            n = len(self.review_confirmations)
+        return {**row, "n_confirmations": n}
 
     @staticmethod
     def _face_jpeg(frame, d: dict) -> bytes | None:
@@ -192,7 +224,7 @@ class BehaviorRecorder:
         return max(0.0, (frame_idx - base) / self.fps) if self.fps else 0.0
 
     def _touch_observation(self, sid: str, t_sec: float) -> None:
-        """Gộp khoảng quan sát liên tục theo student_id (posed + known)."""
+        """Gộp khoảng quan sát liên tục theo student_id đã khóa (known)."""
         gap = EPISODE_GAP_SEC
         open_span = self._obs_open.get(sid)
         if open_span is None:
@@ -233,6 +265,9 @@ class BehaviorRecorder:
                             jpg = self._face_jpeg(frame, d)
                             if jpg:
                                 self._face_best[sid] = (pct, jpg)
+                    # Coverage ERNU theo thời gian đã nhận diện (khóa ID), không chỉ khi có pose.
+                    # UI hiện mã HS nhưng thiếu pose trước đây → coverage thấp → toàn U → «Chưa đủ dữ liệu».
+                    self._touch_observation(sid, t_sec)
                 if not d.get("posed"):
                     continue
                 st = self._stats.get(tid)
@@ -250,8 +285,6 @@ class BehaviorRecorder:
                 st.minute_n[minute] += 1
 
                 event_sid = d["student_id"] if d.get("known") and d.get("student_id") else None
-                if event_sid is not None:
-                    self._touch_observation(event_sid, t_sec)
                 for reason in d.get("reasons") or []:
                     name, secs = _normalize(reason)
                     if name is None:
@@ -459,6 +492,7 @@ class BehaviorRecorder:
             segs = list(self.activity_segments)
             vid = self.video_id
             cfg = self.ernu_cfg
+            confs = list(self.review_confirmations)
         return analyze_session(
             video_id=vid,
             duration_sec=duration,
@@ -467,6 +501,7 @@ class BehaviorRecorder:
             observations=observations,
             activity_segments=segs,
             cfg=cfg,
+            review_confirmations=confs,
         )
 
     def summary(self) -> dict:
@@ -527,12 +562,18 @@ class BehaviorRecorder:
                 "ernu": None if em is None else {
                     "T": em.T, "T_E": em.T_E, "T_R": em.T_R, "T_N": em.T_N, "T_U": em.T_U,
                     "T_valid": em.T_valid,
+                    "T_ON": em.T_ON, "T_OFF": em.T_OFF, "T_PENDING": em.T_PENDING,
+                    "T_UNCERTAIN": em.T_UNCERTAIN, "T_NO_DATA": em.T_NO_DATA,
                     "C": em.C, "P_E": em.P_E, "P_R": em.P_R, "P_N": em.P_N, "P_U": em.P_U,
+                    "P_ON": em.P_ON, "P_OFF": em.P_OFF, "P_PENDING": em.P_PENDING,
+                    "P_UNCERTAIN": em.P_UNCERTAIN, "P_NO_DATA": em.P_NO_DATA,
                     "data_status": em.data_status,
                     "publishable": em.publishable,
                     "BEEI": em.BEEI,
                     "BEEI_wN0": em.BEEI_wN0,
                     "BEEI_wN1": em.BEEI_wN1,
+                    "focus_verdict": em.focus_verdict,
+                    "focus_score": em.focus_score,
                     "interpretation": em.interpretation,
                 },
             })
@@ -569,25 +610,37 @@ class BehaviorRecorder:
             "ernu": {
                 **class_ernu,
                 "rules_version": self.ernu_cfg.rules_version,
+                "rules_path": getattr(self.ernu_cfg, "rules_path", "") or "",
                 "window_sec": self.ernu_cfg.window_sec,
                 "c_min": self.ernu_cfg.c_min,
                 "publish_c_min": self.ernu_cfg.publish_c_min,
                 "default_activity": self.ernu_cfg.default_activity,
                 "activity_segments": len(self.activity_segments),
+                "activity_context": list(self.activity_segments),
                 "n_windows": len(windows),
+                "n_review_confirmations": len(self.review_confirmations),
+                "proxy_mapping": getattr(self.ernu_cfg, "proxy_mapping", None) or {
+                    "E": "ON", "R": "PENDING", "N": "UNCERTAIN", "U": "NO_DATA",
+                },
                 "disclaimer": (
-                    "E/R/N/U là nhãn cửa sổ theo hành vi quan sát được — "
-                    "không phải điểm tập trung nhận thức hay xếp hạng học sinh. "
-                    "BEEI chỉ là chỉ số phụ; khi coverage thấp không dùng đơn độc."
+                    "Tự động: viết bài/giơ tay → ON; gục bàn/cúi lâu (theo quy tắc) → OFF. "
+                    "Hết phiên mỗi học sinh có kết luận Tập trung / Không tập trung "
+                    f"(ngưỡng điểm {getattr(self.ernu_cfg, 'focus_threshold', 50)}). "
+                    "Không cần nhập ngữ cảnh A1–A5 hay xác nhận thủ công."
                 ),
             },
         }
 
-    def export_excel(self, path: Path) -> Path:
+    def workbook_bytes(self) -> bytes:
         with self._lock:
             wb = self._build_workbook()
+        buf = io.BytesIO()
+        wb.save(buf)
+        return buf.getvalue()
+
+    def export_excel(self, path: Path) -> Path:
         path.parent.mkdir(parents=True, exist_ok=True)
-        wb.save(path)
+        path.write_bytes(self.workbook_bytes())
         return path
 
     @staticmethod
@@ -600,12 +653,18 @@ class BehaviorRecorder:
             return "Trung bình"
         return "Thấp — cần kiểm tra"
 
-    def _write_attendance_sheet(self, ws, per_student: dict[str, dict]) -> None:
+    def _write_attendance_sheet(
+        self,
+        ws,
+        per_student: dict[str, dict],
+        ernu_by_sid: dict | None = None,
+    ) -> None:
         """Sheet chính: mỗi học sinh trong danh sách lớp là 1 hàng. Gọi khi đang giữ self._lock."""
         from openpyxl.drawing.image import Image as XLImage
         from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
         from openpyxl.utils import get_column_letter
 
+        ernu_by_sid = ernu_by_sid or {}
         ws.title = "Điểm danh theo HS"
         votes = self._sid_vote_totals()
         face_totals = self._sid_face_match_totals()
@@ -615,6 +674,7 @@ class BehaviorRecorder:
 
         headers = [
             ("STT", 5), ("Mã HS", 10), ("Họ và tên", 22), ("Lớp", 8), ("Trạng thái", 11),
+            ("Kết luận tập trung", 16), ("Điểm tập trung", 12),
             ("Ngày (như video)", 12), ("Giờ điểm danh (lần đầu nhận diện)", 13),
             ("Lần cuối thấy", 11), ("Thời gian có mặt (phút)", 11),
             ("Quan sát có danh tính", 11), ("Lần ArcFace khớp", 11),
@@ -632,13 +692,30 @@ class BehaviorRecorder:
 
         rows, images = [], []
         n_present = 0
+        n_focus = n_unfocus = n_na = 0
         for i, sid in enumerate(roster, start=1):
             agg = per_student.get(sid)
             present = sid in present_ids
             n_present += present
             name = self._display_name(sid)
+            em = ernu_by_sid.get(sid)
+            if present and em is not None:
+                verdict = em.focus_verdict or "Chưa đủ dữ liệu"
+                score = em.focus_score
+            elif present:
+                verdict = "Chưa đủ dữ liệu"
+                score = None
+            else:
+                verdict = ""
+                score = None
+            if verdict == "Tập trung":
+                n_focus += 1
+            elif verdict == "Không tập trung":
+                n_unfocus += 1
+            elif verdict == "Chưa đủ dữ liệu":
+                n_na += 1
             row = [i, sid, name, self.student_classes.get(sid) or self.default_class,
-                   "Có mặt" if present else "Vắng"]
+                   "Có mặt" if present else "Vắng", verdict, score]
             if present and agg:
                 date_s, from_s, _o = self._time_cells(*agg["first"])
                 _d, to_s, _o2 = self._time_cells(*agg["last"])
@@ -699,7 +776,10 @@ class BehaviorRecorder:
             ("Tín hiệu cần xem thô (B4/B5)", _fmt_class(per_student, REVIEW_BEHAVIORS)),
             ("Không xác định (thiếu pose)", _fmt_unknown(per_student)),
             ("Track chưa nhận diện được mặt", sum(1 for s in per_student if s.startswith("ID"))),
-            ("Chỉ số ERNU", "Xem sheet TONG_HOP_ERNU và PREDICTED_WINDOWS (E/R/N/U theo cửa sổ 10s)."),
+            ("Kết luận tập trung (tự động)",
+             f"Tập trung={n_focus}; Không tập trung={n_unfocus}; Chưa đủ dữ liệu={n_na}. "
+             f"Ngưỡng điểm ≥ {getattr(self.ernu_cfg, 'focus_threshold', 50)}. "
+             "Xem cột «Kết luận tập trung» bên dưới hoặc sheet KET_LUAN_TAP_TRUNG / TONG_HOP_ERNU."),
             ("Quy tắc điểm danh", (
                 f"Chế độ đang dùng: {self.attendance_mode}. "
                 f"identity_observations ≥ {PRESENT_MIN_FRAMES} "
@@ -739,7 +819,14 @@ class BehaviorRecorder:
             "Cao": PatternFill("solid", fgColor="E2F5E6"),
             "Trung bình": PatternFill("solid", fgColor="FFF2CC"),
             "Thấp — cần kiểm tra": PatternFill("solid", fgColor="FCE4D6"),
+            "Tập trung": PatternFill("solid", fgColor="E2F5E6"),
+            "Không tập trung": PatternFill("solid", fgColor="FDE2E1"),
+            "Chưa đủ dữ liệu": PatternFill("solid", fgColor="FFF2CC"),
         }
+        # Cột: 5=Trạng thái, 6=Kết luận, 16=Mức tin cậy (sau khi chèn 2 cột), 18/19=hành vi
+        col_conf = [h for h, _w in headers].index("Mức tin cậy") + 1
+        col_act = [h for h, _w in headers].index("Hoạt động quan sát được") + 1
+        col_rev = [h for h, _w in headers].index("Tư thế cần xem lại") + 1
         img_max_w = FACE_THUMB_H * 3 // 2
         has_images = any(images)
         widest = 0
@@ -748,12 +835,16 @@ class BehaviorRecorder:
             for c, v in enumerate(row, start=1):
                 cell = ws.cell(row=r, column=c, value=v)
                 cell.border = border
-                cell.alignment = Alignment(horizontal="left" if c in (2, 3, 16, 17, ncol) else "center",
-                                           vertical="center", wrap_text=c in (3, 16, 17, ncol))
-            ws.cell(row=r, column=5).fill = fills[row[4]]
-            # Cột "Mức tin cậy" (index 13 sau khi thêm cột ArcFace khớp)
-            if len(row) > 13 and row[13] in fills:
-                ws.cell(row=r, column=14).fill = fills[row[13]]
+                cell.alignment = Alignment(
+                    horizontal="left" if c in (2, 3, col_act, col_rev, ncol) else "center",
+                    vertical="center",
+                    wrap_text=c in (3, 6, col_act, col_rev, ncol),
+                )
+            ws.cell(row=r, column=5).fill = fills.get(row[4], PatternFill())
+            if row[5] in fills:
+                ws.cell(row=r, column=6).fill = fills[row[5]]
+            if len(row) >= col_conf and row[col_conf - 1] in fills:
+                ws.cell(row=r, column=col_conf).fill = fills[row[col_conf - 1]]
             if has_images:
                 ws.row_dimensions[r].height = FACE_THUMB_H * 0.75 + 4
             if jpg:
@@ -807,7 +898,68 @@ class BehaviorRecorder:
                 ws.auto_filter.ref = ws.dimensions
 
         per_student = self._per_student(episodes)
-        self._write_attendance_sheet(wb.active, per_student)
+
+        # Tính ERNU một lần — dùng cho điểm danh + các sheet tổng hợp
+        ernu_windows, ernu_metrics, class_ernu = analyze_session(
+            video_id=self.video_id,
+            duration_sec=self._session_duration_sec(),
+            student_ids=sorted({
+                s for s in (
+                    list(self.student_names)
+                    + [b.student_id for b in self._behavior_intervals(episodes)]
+                    + [o.student_id for o in self._flush_observations()]
+                ) if s and not str(s).startswith("ID")
+            }),
+            behaviors=self._behavior_intervals(episodes),
+            observations=self._flush_observations(),
+            activity_segments=self.activity_segments,
+            cfg=self.ernu_cfg,
+            review_confirmations=list(self.review_confirmations),
+        )
+        ernu_by_sid = {m.student_id: m for m in ernu_metrics}
+        self._write_attendance_sheet(wb.active, per_student, ernu_by_sid)
+
+        # --- Sheet kết luận dễ đọc (đặt ngay sau điểm danh)
+        ws_focus = wb.create_sheet("KET_LUAN_TAP_TRUNG", 1)
+        focus_rows = []
+        for i, m in enumerate(sorted(ernu_metrics, key=lambda x: (
+            0 if x.focus_verdict == "Không tập trung" else
+            1 if x.focus_verdict == "Chưa đủ dữ liệu" else 2,
+            x.focus_score if x.focus_score is not None else 999,
+            x.student_id,
+        )), start=1):
+            focus_rows.append([
+                i, m.student_id, self._display_name(m.student_id),
+                m.focus_verdict, m.focus_score,
+                m.C, m.P_ON, m.P_OFF, m.P_UNCERTAIN, m.BEEI,
+                m.data_status,
+            ])
+        focus_rows.append([
+            "", "(LỚP)", "",
+            f"Tập trung={class_ernu.get('n_tap_trung', 0)}; "
+            f"Không={class_ernu.get('n_khong_tap_trung', 0)}; "
+            f"Thiếu DL={class_ernu.get('n_chua_du_du_lieu', 0)}",
+            class_ernu.get("focus_threshold"),
+            class_ernu.get("C"), class_ernu.get("P_ON"), class_ernu.get("P_OFF"),
+            class_ernu.get("P_UNCERTAIN"), class_ernu.get("BEEI"),
+            class_ernu.get("data_status"),
+        ])
+        write_sheet(
+            ws_focus,
+            ["STT", "Mã HS", "Họ và tên", "Kết luận", "Điểm",
+             "C_%", "P_ON_%", "P_OFF_%", "P_UNCERTAIN_%", "BEEI", "data_status"],
+            focus_rows,
+            [5, 12, 22, 16, 10, 8, 8, 8, 12, 8, 16],
+        )
+        focus_fill = {
+            "Tập trung": good_fill,
+            "Không tập trung": bad_fill,
+            "Chưa đủ dữ liệu": PatternFill("solid", fgColor="FFF2CC"),
+        }
+        for row in ws_focus.iter_rows(min_row=2, min_col=4, max_col=4, max_row=1 + len(focus_rows)):
+            cell = row[0]
+            if cell.value in focus_fill:
+                cell.fill = focus_fill[cell.value]
 
         # --- Chi tiết hành vi
         ws = wb.create_sheet("Chi tiết hành vi")
@@ -863,28 +1015,13 @@ class BehaviorRecorder:
             rows2.append(row)
         write_sheet(ws2, headers, rows2, [10, 16, 12, 12, 16, 18] + [11] * (2 * len(BEHAVIORS)))
 
-        # --- ERNU: cửa sổ dự đoán + tổng hợp
-        ernu_windows, ernu_metrics, class_ernu = analyze_session(
-            video_id=self.video_id,
-            duration_sec=self._session_duration_sec(),
-            student_ids=sorted({
-                s for s in (
-                    list(self.student_names)
-                    + [b.student_id for b in self._behavior_intervals(episodes)]
-                    + [o.student_id for o in self._flush_observations()]
-                ) if s and not str(s).startswith("ID")
-            }),
-            behaviors=self._behavior_intervals(episodes),
-            observations=self._flush_observations(),
-            activity_segments=self.activity_segments,
-            cfg=self.ernu_cfg,
-        )
-
+        # --- ERNU: cửa sổ dự đoán + tổng hợp (đã tính ở đầu _build_workbook)
         ws_pred = wb.create_sheet("PREDICTED_WINDOWS")
         pred_rows = [
             [
                 w.video_id, w.student_id, w.start_sec, w.end_sec, w.activity_code,
                 ",".join(w.behavior_events), w.valid_coverage, w.pred_label,
+                w.proxy_label, "1" if w.confirmed_off else "0",
                 w.reason, "1" if w.mixed else "0", w.rules_version,
             ]
             for w in ernu_windows
@@ -892,10 +1029,10 @@ class BehaviorRecorder:
         write_sheet(
             ws_pred,
             ["video_id", "student_id", "start_sec", "end_sec", "activity_code",
-             "behavior_events", "valid_coverage", "pred_label", "reason", "mixed",
-             "rules_version"],
+             "behavior_events", "valid_coverage", "pred_label", "proxy_label",
+             "confirmed_off", "reason", "mixed", "rules_version"],
             pred_rows,
-            [14, 12, 10, 10, 12, 22, 12, 10, 40, 8, 12],
+            [14, 12, 10, 10, 12, 22, 12, 10, 12, 10, 40, 8, 12],
         )
         label_fill = {
             "E": good_fill,
@@ -903,53 +1040,84 @@ class BehaviorRecorder:
             "N": PatternFill("solid", fgColor="FFF2CC"),
             "U": PatternFill("solid", fgColor="DDEBF7"),
         }
+        proxy_fill = {
+            "ON": good_fill,
+            "OFF": bad_fill,
+            "PENDING": PatternFill("solid", fgColor="FCE4D6"),
+            "UNCERTAIN": PatternFill("solid", fgColor="FFF2CC"),
+            "NO_DATA": PatternFill("solid", fgColor="DDEBF7"),
+        }
         for row in ws_pred.iter_rows(min_row=2, min_col=8, max_col=8):
             cell = row[0]
             if cell.value in label_fill:
                 cell.fill = label_fill[cell.value]
+        for row in ws_pred.iter_rows(min_row=2, min_col=9, max_col=9):
+            cell = row[0]
+            if cell.value in proxy_fill:
+                cell.fill = proxy_fill[cell.value]
 
         ws_ernu = wb.create_sheet("TONG_HOP_ERNU")
         write_sheet(
             ws_ernu,
-            ["student_id", "name", "T", "T_E", "T_R", "T_N", "T_U",
+            ["student_id", "name", "focus_verdict", "focus_score",
+             "T", "T_E", "T_R", "T_N", "T_U",
+             "T_ON", "T_OFF", "T_PENDING", "T_UNCERTAIN", "T_NO_DATA",
              "C_%", "P_E_%", "P_R_%", "P_N_%", "P_U_%",
+             "P_ON_%", "P_OFF_%", "P_PENDING_%", "P_UNCERTAIN_%", "P_NO_DATA_%",
              "data_status", "publishable", "BEEI", "BEEI_wN0", "BEEI_wN1"],
             [
                 [
                     m.student_id, self._display_name(m.student_id),
+                    m.focus_verdict, m.focus_score,
                     m.T, m.T_E, m.T_R, m.T_N, m.T_U,
+                    m.T_ON, m.T_OFF, m.T_PENDING, m.T_UNCERTAIN, m.T_NO_DATA,
                     m.C, m.P_E, m.P_R, m.P_N, m.P_U,
+                    m.P_ON, m.P_OFF, m.P_PENDING, m.P_UNCERTAIN, m.P_NO_DATA,
                     m.data_status, "1" if m.publishable else "0",
                     m.BEEI, m.BEEI_wN0, m.BEEI_wN1,
                 ]
                 for m in ernu_metrics
             ] + [[
                 "(LỚP)", "",
+                f"Tập trung={class_ernu.get('n_tap_trung', 0)}; "
+                f"Không={class_ernu.get('n_khong_tap_trung', 0)}; "
+                f"Thiếu DL={class_ernu.get('n_chua_du_du_lieu', 0)}",
+                class_ernu.get("focus_threshold"),
                 class_ernu["T"], class_ernu["T_E"], class_ernu["T_R"], class_ernu["T_N"], class_ernu["T_U"],
+                class_ernu.get("T_ON"), class_ernu.get("T_OFF"), class_ernu.get("T_PENDING"),
+                class_ernu.get("T_UNCERTAIN"), class_ernu.get("T_NO_DATA"),
                 class_ernu["C"], class_ernu["P_E"], class_ernu["P_R"], class_ernu["P_N"], class_ernu["P_U"],
+                class_ernu.get("P_ON"), class_ernu.get("P_OFF"), class_ernu.get("P_PENDING"),
+                class_ernu.get("P_UNCERTAIN"), class_ernu.get("P_NO_DATA"),
                 class_ernu["data_status"], "1" if class_ernu.get("publishable") else "0",
                 class_ernu["BEEI"], class_ernu["BEEI_wN0"], class_ernu["BEEI_wN1"],
             ]],
-            [12, 18, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 16, 12, 8, 10, 10],
+            [12, 18, 16, 10] + [8] * 25,
         )
 
         # --- Diễn giải (mục 6 bộ tiêu chí)
         ws_interp = wb.create_sheet("DIEN_GIAI_ERNU")
         interp_rows = [
-            [m.student_id, self._display_name(m.student_id), m.data_status,
-             "1" if m.publishable else "0", m.interpretation]
+            [m.student_id, self._display_name(m.student_id), m.focus_verdict, m.focus_score,
+             m.data_status, "1" if m.publishable else "0", m.interpretation]
             for m in ernu_metrics
         ]
         interp_rows.append([
-            "(LỚP)", "", class_ernu["data_status"],
+            "(LỚP)", "",
+            f"Tập trung={class_ernu.get('n_tap_trung', 0)}; "
+            f"Không={class_ernu.get('n_khong_tap_trung', 0)}; "
+            f"Thiếu DL={class_ernu.get('n_chua_du_du_lieu', 0)}",
+            class_ernu.get("focus_threshold"),
+            class_ernu["data_status"],
             "1" if class_ernu.get("publishable") else "0",
             class_ernu.get("interpretation") or "",
         ])
         write_sheet(
             ws_interp,
-            ["student_id", "name", "data_status", "publishable", "interpretation"],
+            ["student_id", "name", "focus_verdict", "focus_score",
+             "data_status", "publishable", "interpretation"],
             interp_rows,
-            [12, 18, 16, 12, 100],
+            [12, 18, 16, 10, 16, 12, 100],
         )
 
         # --- Thông tin
@@ -982,9 +1150,13 @@ class BehaviorRecorder:
             ("Hoạt động mặc định", self.ernu_cfg.default_activity),
             ("Số đoạn ACTIVITY_CONTEXT", len(self.activity_segments)),
             ("Số cửa sổ PREDICTED", len(ernu_windows)),
+            ("Proxy mapping", str(getattr(self.ernu_cfg, "proxy_mapping", {}) or {})),
+            ("Số xác nhận review→OFF", len(self.review_confirmations)),
             ("Ghi chú", "Hành vi thô B1–B5 tách khỏi nhãn cửa sổ E/R/N/U. "
                         "E = bằng chứng thực hiện nhiệm vụ; R = cần giáo viên xem lại; "
                         "N = quan sát được nhưng chưa đủ căn cứ; U = thiếu dữ liệu quan sát. "
+                        "Proxy: E→ON, R→PENDING, N→UNCERTAIN, U→NO_DATA; "
+                        "OFF chỉ sau xác nhận xem lại — không tự gán từ R. "
                         "Không đồng nhất tư thế với mức tập trung nhận thức. "
                         "BEEI chỉ là chỉ số phụ (dashboard), không phải điểm tập trung; "
                         "khi coverage thấp không xếp mức / không dùng đơn độc. "

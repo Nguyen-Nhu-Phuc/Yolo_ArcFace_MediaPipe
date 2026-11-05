@@ -11,6 +11,7 @@ Không train lại backbone ArcFace trên 33 ảnh — chỉ xuất gallery embe
 from __future__ import annotations
 
 import csv
+import io
 import json
 import os
 import threading
@@ -137,6 +138,10 @@ def _roster_path() -> Path:
 
 
 def _read_students_csv() -> list[dict]:
+    from core.db import enabled
+    if enabled():
+        from core.mongo_roster import roster_rows
+        return roster_rows()
     path = _roster_path()
     if not path.exists():
         return []
@@ -186,6 +191,12 @@ def display_code(student_id: str | None) -> str:
     if not student_id:
         return ""
     return display_codes().get(student_id, student_id)
+
+
+def reset_display_codes() -> None:
+    """Xóa cache số trên khung sau khi danh sách lớp đổi thứ tự hoặc thêm học sinh."""
+    global _display_codes
+    _display_codes = None
 
 
 def roster_names(ids: list[str], gallery_names: list[str]) -> dict[str, str]:
@@ -305,22 +316,35 @@ class FaceRecognizer:
     """Load gallery đã xuất + so khớp ArcFace InsightFace."""
 
     def __init__(self, force_rebuild: bool = False):
-        if force_rebuild:
-            # Gọi lại exporter
-            from tools.export_arcface_model import export_gallery
+        from core.db import enabled
 
-            export_gallery(DATASET_DIR, MODEL_DIR)
+        raw = None
+        source = ""
+        if enabled():
+            from core.gallery_store import load_bytes, rebuild_from_roster
+            from core.mongo_roster import ensure_ready
 
+            ensure_ready()
+            raw = rebuild_from_roster() if force_rebuild else load_bytes()
+            source = "MongoDB Atlas"
         _load_thresholds_from_meta()
-        path = resolve_gallery_path()
-        data = np.load(path, allow_pickle=True)
+        if raw is not None:
+            data = np.load(io.BytesIO(raw), allow_pickle=True)
+            self.gallery_path = source
+        else:
+            if force_rebuild:
+                from tools.export_arcface_model import export_gallery
+
+                export_gallery(DATASET_DIR, MODEL_DIR)
+            path = resolve_gallery_path()
+            data = np.load(path, allow_pickle=True)
+            self.gallery_path = path
         self.ids: list[str] = data["ids"].tolist()
         self.names: list[str] = data["names"].tolist()
         self.embeddings: np.ndarray = data["embeddings"].astype(np.float32)
         # chuẩn hóa lại
         norms = np.linalg.norm(self.embeddings, axis=1, keepdims=True) + 1e-8
         self.embeddings = self.embeddings / norms
-        self.gallery_path = path
         self.match_threshold = MATCH_THRESHOLD
         self.min_compat_pct = MIN_COMPAT_PCT
         self.min_margin = MIN_MARGIN
@@ -331,7 +355,7 @@ class FaceRecognizer:
         # warmup
         get_face_app()
         print(
-            f"Gallery ArcFace: {len(self.ids)} HS từ {path} | "
+            f"Gallery ArcFace: {len(self.ids)} HS từ {self.gallery_path} | "
             f"thr={self.match_threshold:.2f} (≥{self.min_compat_pct:.0f}%) "
             f"margin={self.min_margin} | khóa cứng ≥{HARD_LOCK_PCT:.0f}% (+{HARD_LOCK_MARGIN_PCT:.0f}%)"
         )

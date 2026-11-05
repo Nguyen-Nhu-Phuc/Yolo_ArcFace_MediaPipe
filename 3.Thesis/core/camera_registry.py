@@ -196,13 +196,29 @@ class CameraRegistry:
             self._save()
 
     def _load(self) -> None:
+        from core.db import enabled, get_db
+        if enabled():
+            doc = get_db().settings.find_one({"_id": "cameras"})
+            if doc is None:
+                self._load_file()
+                self._save()
+                return
+            items = doc.get("cameras") if isinstance(doc, dict) else None
+            if isinstance(items, list):
+                self._fill(items)
+            return
+        self._load_file()
+
+    def _load_file(self) -> None:
         try:
             raw = json.loads(self.path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             return
         items = raw.get("cameras") if isinstance(raw, dict) else None
-        if not isinstance(items, list):
-            return
+        if isinstance(items, list):
+            self._fill(items)
+
+    def _fill(self, items: list) -> None:
         for item in items:
             if not isinstance(item, dict):
                 continue
@@ -217,10 +233,18 @@ class CameraRegistry:
             self._items[camera_id] = {"id": camera_id, "name": name, "source": source}
 
     def _save(self) -> None:
+        from core.db import enabled, get_db
+        payload = list(self._items.values())
+        if enabled():
+            get_db().settings.replace_one(
+                {"_id": "cameras"},
+                {"_id": "cameras", "cameras": payload},
+                upsert=True,
+            )
+            return
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        payload = {"cameras": list(self._items.values())}
         tmp = self.path.with_suffix(".json.tmp")
-        tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        tmp.write_text(json.dumps({"cameras": payload}, ensure_ascii=False, indent=2), encoding="utf-8")
         tmp.replace(self.path)
 
 
