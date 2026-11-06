@@ -1,17 +1,17 @@
-3.Thesis/static/uploads/
-3.Thesis/static/outputs/
-3.Thesis/reports/
-3.Thesis/demo/
+static/uploads/
+static/outputs/
+reports/
+demo/
 behavior_settings.json
-2.Data/cameras.json
-3.Thesis/yolo*.pt
-3.Thesis/models/yolo*.pt
-3.Thesis/logs/
+data/cameras.json
+yolo*.pt
+models/yolo*.pt
+logs/
 __pycache__/
 *.pyc
 .venv/
-.venv-compare/
 venv/
+.DS_Store
 
 # Dữ liệu thử / dataset (ảnh khuôn mặt — không đẩy lên GitHub)
 frames_lop_hoc (1)/
@@ -22,12 +22,3 @@ classroom-faces/
 *_dataset_arcface.zip
 _probe_home.html
 .env
-3.Thesis/.env
-
-# File nằm ngay thư mục gốc — không đẩy lên GitHub. Thư mục con vẫn được theo dõi.
-/*
-!/.gitignore
-!/*/
-/.venv/
-/.venv-compare/
-/venv/

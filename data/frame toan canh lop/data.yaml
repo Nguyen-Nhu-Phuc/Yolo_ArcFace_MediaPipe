@@ -1,0 +1,13 @@
+train: ../train/images
+val: ../valid/images
+test: ../test/images
+
+nc: 1
+names: ['person']
+
+roboflow:
+  workspace: his-workspace-qchkq
+  project: frame-toan-canh-lop-rrz7r
+  version: 2
+  license: CC BY 4.0
+  url: https://universe.roboflow.com/his-workspace-qchkq/frame-toan-canh-lop-rrz7r/dataset/2
