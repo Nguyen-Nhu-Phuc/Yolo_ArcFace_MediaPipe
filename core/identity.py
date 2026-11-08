@@ -7,6 +7,7 @@ Tách 2 phần để chạy ở 2 luồng:
 
 from __future__ import annotations
 
+import os
 import threading
 
 import cv2
@@ -14,12 +15,12 @@ import numpy as np
 
 from core.face_gallery import FaceRecognizer, get_face_app, sim_to_pct
 
-RECOG_EVERY_UNKNOWN = 1  # thử lại sớm — phủ đều cả lớp qua nhiều vòng
-RECOG_EVERY_KNOWN = 12  # đã khóa: kiểm tra lại thưa hơn (tránh gỡ tên khi cúi/xa)
+RECOG_EVERY_UNKNOWN = 2  # thử lại sớm — phủ đều cả lớp qua nhiều vòng
+RECOG_EVERY_KNOWN = 24  # đã khóa: kiểm tra lại thưa (tiết kiệm crop CPU)
 # Crop thất bại liên tiếp → giãn nhịp thử lại (mỗi crop tốn nhiều lượt detect mặt)
-RECOG_BACKOFF_MAX = 8
-MAX_RECOG_PER_ROUND = 22  # nhận diện N người / vòng (luân phiên cả lớp)
-MAX_REVERIFY_PER_ROUND = 4  # số track đã khóa được kiểm tra lại / vòng
+RECOG_BACKOFF_MAX = 10
+MAX_RECOG_PER_ROUND = 3  # crop bổ sung khi sweep bỏ sót — giữ thấp để vòng nhanh hơn
+MAX_REVERIFY_PER_ROUND = 1  # số track đã khóa được kiểm tra lại / vòng
 RECOG_BANDS = 3  # chia khung: trên (cuối lớp) / giữa / dưới (gần cam)
 MIN_BOX_W = 22
 MIN_BOX_H = 36
@@ -28,7 +29,7 @@ STICKY_IOU = 0.20  # IoU tối thiểu để đề cử cùng vị trí (chưa k
 # Ngưỡng khóa cứng nằm trong FaceRecognizer (hard_lock_sim / hard_lock_margin, chỉnh trên giao diện)
 # TTL tính theo số lần cập nhật track, không phải giây tường — chỉ ~15 phút nếu ~1 cập nhật/giây.
 HARD_STICKY_TTL = 900
-HARD_RECOG_EVERY = 24  # khóa cứng: kiểm tra lại thưa hơn nữa
+HARD_RECOG_EVERY = 48  # khóa cứng: kiểm tra lại thưa hơn nữa
 # Track đang giữ mã không thấy trong N lần cập nhật → coi như vắng, track mới được nhận lại mã
 OWNER_ABSENT_UPDATES = 3
 # Không chuyển khóa danh tính chỉ vì IoU chồng lấp; cần ArcFace xác minh lại.
@@ -39,11 +40,11 @@ OSD_TOP_FRAC = 0.18
 OSD_SIDE_FRAC = 0.28
 OSD_MAX_AREA_FRAC = 0.04
 NO_FACE_HIDE_AFTER = 2
-FACE_SWEEP_EVERY = 2
-FACE_SWEEP_MAX = 40
+FACE_SWEEP_EVERY = 2  # quét toàn khung cách vòng — giảm ~½ lần detect nặng nhất
+FACE_SWEEP_MAX = 30
 # Detector InsightFace luôn resize về det_size; ảnh nguồn lớn hơn chỉ làm crop mặt căn chỉnh nét hơn
-# (đo trên video lớp: 960px → top-1 trung vị 40%, 1280px → 47%)
-FACE_SWEEP_MAX_SIDE = 1280
+# (720 cân tốc độ/độ khớp; set FACE_SWEEP_MAX_SIDE=960 nếu cần mặt cuối lớp rõ hơn)
+FACE_SWEEP_MAX_SIDE = max(480, min(1280, int(os.environ.get("FACE_SWEEP_MAX_SIDE", "720"))))
 HEAD_POSE_KEEP = 30  # bỏ góc đầu cũ hơn N lần cập nhật track
 
 Track = tuple[int, int, int, int, int]  # (tid, x1, y1, x2, y2)
@@ -523,8 +524,13 @@ class IdentityTracker:
             to_recog = [t[:5] for t in pending_first + fair_unnamed + fair_rest]
             to_reverify = [t[:5] for t in reverify_candidates[:MAX_REVERIFY_PER_ROUND]]
 
+        swept: set[int] = set()
         if recog_i % FACE_SWEEP_EVERY == 0:
-            self._face_sweep(frame, parsed, recog_i, epoch)
+            swept = self._face_sweep(frame, parsed, recog_i, epoch)
+
+        # Quét toàn khung đã gán → bỏ crop trùng (tiết kiệm ~1 lần detect / người)
+        to_reverify = [t for t in to_reverify if t[0] not in swept]
+        to_recog = [t for t in to_recog if t[0] not in swept]
 
         for tid, x1, y1, x2, y2 in to_reverify:
             sid, full_name, sim, margin = self.rec.match_person_crop(frame[y1:y2, x1:x2])
@@ -563,8 +569,14 @@ class IdentityTracker:
                 else:
                     self.id_fail[tid] = self.id_fail.get(tid, 0) + 1
 
-    def _face_sweep(self, frame: np.ndarray, parsed: list[Track], recog_i: int, epoch: int) -> None:
-        """Quét mặt toàn khung rồi gán vào track (phủ lớp tốt hơn crop từng người)."""
+    def _face_sweep(
+        self, frame: np.ndarray, parsed: list[Track], recog_i: int, epoch: int
+    ) -> set[int]:
+        """Quét mặt toàn khung rồi gán vào track (phủ lớp tốt hơn crop từng người).
+
+        Trả về tập track đã xử lý trong vòng này để bỏ crop trùng.
+        """
+        touched: set[int] = set()
         try:
             face_app = get_face_app()
             sh, sw = frame.shape[:2]
@@ -579,7 +591,7 @@ class IdentityTracker:
                 sy = sh / sweep.shape[0]
             faces = face_app.get(sweep) or []
         except Exception:
-            return
+            return touched
         faces = sorted(
             faces,
             key=lambda f: (f.bbox[2] - f.bbox[0]) * (f.bbox[3] - f.bbox[1]),
@@ -597,7 +609,8 @@ class IdentityTracker:
             pose = face.get("pose")
             with self.lock:
                 if self.epoch != epoch:
-                    return
+                    return touched
+                touched.add(tid)
                 if pose is not None:
                     # InsightFace: pose = [pitch, yaw, roll], pitch âm khi cúi
                     self.id_head_pose[tid] = (float(pose[1]), -float(pose[0]), self.frame_i - 1)
@@ -608,3 +621,6 @@ class IdentityTracker:
                     self._try_pin_from_match(tid, sid, full_name, sim, margin)
                 elif sim > 0:
                     self.id_last_pct[tid] = sim_to_pct(sim)
+                if tid in self.id_locked:
+                    self.id_fail.pop(tid, None)
+        return touched

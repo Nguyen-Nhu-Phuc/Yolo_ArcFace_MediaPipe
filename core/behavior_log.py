@@ -528,6 +528,9 @@ class BehaviorRecorder:
         windows, ernu_metrics, class_ernu = self.build_ernu()
         ernu_by_sid = {m.student_id: m for m in ernu_metrics}
 
+        def class_of(sid: str) -> str:
+            return (self.student_classes.get(sid) or self.default_class or "").strip()
+
         students = []
         for sid in sorted(present_ids):
             agg = per_student.get(sid)
@@ -549,6 +552,7 @@ class BehaviorRecorder:
                 "student_id": sid,
                 "code": display_code(sid),
                 "name": name_of.get(sid, ""),
+                "class_name": class_of(sid),
                 "first_seen": first_seen,
                 "identity_observations": int(votes.get(sid, 0)),
                 "face_match_events": int(face_totals.get(sid, 0)),
@@ -592,12 +596,21 @@ class BehaviorRecorder:
                 "review_pct": round(100.0 * minute_review[m] / n, 1) if n else None,
             })
 
+        classes = sorted({
+            class_of(sid) for sid in roster if class_of(sid)
+        })
         return {
             "roster_size": len(roster),
             "attendance_mode": attendance_mode,
+            "classes": classes,
+            "default_class": self.default_class,
             "present": students,
             "absent": [
-                {"student_id": sid, "name": name_of.get(sid, "")}
+                {
+                    "student_id": sid,
+                    "name": name_of.get(sid, ""),
+                    "class_name": class_of(sid),
+                }
                 for sid in roster if sid not in present_ids
             ],
             "unknown_tracks": unknown_tracks,

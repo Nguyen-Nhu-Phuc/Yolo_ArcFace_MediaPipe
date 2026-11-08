@@ -43,10 +43,18 @@ input:focus, select:focus { border-color: var(--accent); }
 .class-item button, .actions button { height: 28px; }
 .meta { color: var(--muted); font-size: 12px; }
 table { width: 100%; border-collapse: collapse; }
-th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+th, td { text-align: left; padding: 10px 8px; border-bottom: 1px solid var(--border); vertical-align: middle; }
 th { color: var(--muted); font-size: 12px; font-weight: 600; }
-.face { width: 36px; height: 36px; border-radius: 8px; object-fit: cover; background: var(--surface-3); }
-.pill { display: inline-block; padding: 2px 8px; border-radius: 99px; font-size: 12px; background: var(--surface-3); }
+.face { width: 36px; height: 36px; border-radius: 8px; object-fit: cover; background: var(--surface-3); display: block; }
+.pill { display: inline-block; padding: 2px 8px; border-radius: 99px; font-size: 12px; background: var(--surface-3); line-height: 1.4; }
+.student-table { table-layout: fixed; }
+.student-table col.face-col { width: 52px; }
+.student-table col.id-col { width: 88px; }
+.student-table col.class-col { width: 88px; }
+.student-table col.photo-col { width: 88px; }
+.student-table col.gallery-col { width: 88px; }
+.student-table col.act-col { width: 220px; }
+.student-table tbody tr { height: 56px; }
 .pill.ok { background: var(--ok-soft); color: #4ade80; }
 .pill.bad { background: var(--bad-soft); color: #fca5a5; }
 .pill.warn { background: var(--warn-soft); color: #fbbf24; }
@@ -64,7 +72,8 @@ th { color: var(--muted); font-size: 12px; font-weight: 600; }
 .report-table { width: max-content; min-width: 100%; border-collapse: collapse; font-size: 12px; }
 .report-table th, .report-table td { border-bottom: 1px solid var(--border); padding: 6px 8px; white-space: nowrap; }
 .report-scroll { overflow: auto; flex: 1; min-height: 0; min-width: 0; max-width: 100%; }
-.actions { display: flex; gap: 6px; }
+.actions { display: flex; gap: 6px; align-items: center; flex-wrap: nowrap; white-space: nowrap; }
+td > .actions { justify-content: flex-start; }
 .pager { display: flex; gap: 6px; align-items: center; justify-content: flex-end; margin-top: 10px; flex-wrap: wrap; }
 .pager .meta { margin-right: auto; }
 .empty { color: var(--muted); padding: 8px 0; }
@@ -129,7 +138,16 @@ th { color: var(--muted); font-size: 12px; font-weight: 600; }
       <p class="note">Chọn một lớp, tải file mẫu, thêm học sinh rồi nhập lại. Mã đã có trong lớp được cập nhật; mã để trống sẽ được đánh tiếp. Ảnh khuôn mặt thêm riêng trên trang này.</p>
       <p class="note" id="rebuildNote">Ảnh mới chỉ được nhận diện sau khi dựng lại gallery. Phiên đang theo dõi giữ gallery cũ cho đến khi mở lại.</p>
       <div style="overflow:auto">
-        <table>
+        <table class="student-table">
+          <colgroup>
+            <col class="face-col">
+            <col class="id-col">
+            <col>
+            <col class="class-col">
+            <col class="photo-col">
+            <col class="gallery-col">
+            <col class="act-col">
+          </colgroup>
           <thead>
             <tr><th></th><th>Mã</th><th>Họ tên</th><th>Lớp</th><th>Ảnh</th><th>Gallery</th><th></th></tr>
           </thead>
@@ -279,10 +297,12 @@ function reportRows(items) {
     <td><input type="checkbox" data-report-check value="${esc(r.name)}"></td>
     <td>${esc(r.modified)}</td><td>${r.present ?? '-'}</td><td>${r.absent ?? '-'}</td>
     <td>${r.focus ?? '-'}</td><td>${r.unfocus ?? '-'}</td><td>${r.no_data ?? '-'}</td>
-    <td class="actions">
-      <button class="btn ghost" type="button" data-view="${esc(r.name)}">Xem</button>
-      <a class="btn ghost" href="${esc(r.download_url)}">Tải về</a>
-      <button class="btn ghost bad" type="button" data-del-report="${esc(r.name)}">Xóa</button>
+    <td>
+      <div class="actions">
+        <button class="btn ghost" type="button" data-view="${esc(r.name)}">Xem</button>
+        <a class="btn ghost" href="${esc(r.download_url)}">Tải về</a>
+        <button class="btn ghost bad" type="button" data-del-report="${esc(r.name)}">Xóa</button>
+      </div>
     </td>
   </tr>`).join('');
 }
@@ -346,10 +366,12 @@ function renderStudents() {
     <td>${esc(s.class_name)}</td>
     <td>${s.enroll_count ? `<span class="pill ok">${s.enroll_count} ảnh</span>` : '<span class="pill warn">Thiếu</span>'}</td>
     <td>${s.in_gallery ? pill(true, 'Có', '') : '<span class="pill bad">Chưa</span>'}</td>
-    <td class="actions">
-      <button class="btn ghost" data-edit="${esc(s.student_id)}">Sửa</button>
-      <button class="btn ghost" data-photo="${esc(s.student_id)}">Thêm ảnh</button>
-      <button class="btn ghost bad" data-del="${esc(s.student_id)}">Xóa</button>
+    <td>
+      <div class="actions">
+        <button class="btn ghost" data-edit="${esc(s.student_id)}">Sửa</button>
+        <button class="btn ghost" data-photo="${esc(s.student_id)}">Thêm ảnh</button>
+        <button class="btn ghost bad" data-del="${esc(s.student_id)}">Xóa</button>
+      </div>
     </td>
   </tr>`).join('') || '<tr><td colspan="7" class="empty">Không có học sinh</td></tr>';
 }

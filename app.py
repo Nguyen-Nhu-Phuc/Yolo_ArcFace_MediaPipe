@@ -79,7 +79,7 @@ DISPLAY_MAX_FPS = 15.0
 SUMMARY_INTERVAL_SEC = 1.0
 JPEG_QUALITY = 80
 # ArcFace nghỉ = tỉ lệ × thời gian vòng vừa chạy, nhường CPU cho YOLO/pose
-ARCFACE_IDLE_RATIO = 0.5
+ARCFACE_IDLE_RATIO = 0.05  # nghỉ rất ngắn — ưu tiên gắn tên nhanh hơn
 
 _camera_hub = CameraHub()
 
@@ -138,20 +138,42 @@ class _StreamSession:
     """
 
     def __init__(self, cap, fps: float, is_camera: bool, recognizer: FaceRecognizer,
-                 source_label: str, reopen=None):
+                 source_label: str, reopen=None, class_id: str = ""):
         self.cap = cap
         self.fps = fps
         self.is_camera = is_camera
         self.reopen = reopen
         self.cfg = _config
         self.source_label = source_label
-        self._student_names = roster_names(recognizer.ids, recognizer.names)
+        self.class_id = (class_id or "").strip()
         classes = load_student_classes()
         known_classes = [c for c in classes.values() if c]
-        self._student_classes = classes
-        self._default_class = (
-            max(set(known_classes), key=known_classes.count) if known_classes else ""
-        )
+        all_names = roster_names(recognizer.ids, recognizer.names)
+        if self.class_id:
+            # Chỉ điểm danh + khớp ArcFace trong lớp đã chọn
+            self._student_classes = {
+                sid: c for sid, c in classes.items() if (c or "").strip() == self.class_id
+            }
+            self._default_class = self.class_id
+            scoped = recognizer.for_class(self.class_id, classes)
+            self._student_names = {
+                sid: all_names.get(sid) or ""
+                for sid in self._student_classes
+            }
+            for sid, name in zip(scoped.ids, scoped.names):
+                if sid not in self._student_names:
+                    self._student_names[sid] = all_names.get(sid) or ("" if not name or name == sid else name)
+            recognizer = scoped
+            print(
+                f"Phiên theo lớp {self.class_id}: "
+                f"{len(self._student_names)} HS danh sách · {len(recognizer.ids)} HS trong gallery"
+            )
+        else:
+            self._student_classes = classes
+            self._default_class = (
+                max(set(known_classes), key=known_classes.count) if known_classes else ""
+            )
+            self._student_names = all_names
         self.session_id = uuid.uuid4().hex[:10]
         self.clock = VideoClock(fps, is_camera)
         self.recorder = self._make_recorder()
@@ -560,22 +582,27 @@ async def admin_delete_student(student_id: str):
     return {"ok": True}
 
 
-_photo_slots = asyncio.Semaphore(4)
+# Giới hạn tải ảnh song song bằng threading (không dùng asyncio.Semaphore —
+# Semaphore tạo lúc import gắn sai event loop → 500 khi admin mở nhiều ảnh cùng lúc).
+_photo_slots = threading.BoundedSemaphore(12)
 
 
 @app.get("/api/admin/students/{student_id}/photo")
 async def admin_student_photo(student_id: str):
-    async with _photo_slots:
-        try:
-            jpeg = await asyncio.to_thread(first_photo_jpeg, student_id)
-        except Exception as exc:
-            from pymongo.errors import PyMongoError
-            if isinstance(exc, PyMongoError):
-                raise HTTPException(503, "Chưa kết nối được cơ sở dữ liệu") from exc
-            raise
+    def _load() -> bytes | None:
+        with _photo_slots:
+            return first_photo_jpeg(student_id)
+
+    try:
+        jpeg = await asyncio.to_thread(_load)
+    except Exception as exc:
+        from pymongo.errors import PyMongoError
+        if isinstance(exc, PyMongoError):
+            raise HTTPException(503, "Chưa kết nối được cơ sở dữ liệu") from exc
+        raise
     if jpeg is None:
         raise HTTPException(404, "Chưa có ảnh")
-    return Response(content=jpeg, media_type="image/jpeg")
+    return Response(content=jpeg, media_type="image/jpeg", headers={"Cache-Control": "private, max-age=60"})
 
 
 @app.get("/api/admin/reports")
@@ -965,6 +992,7 @@ async def websocket_endpoint(ws: WebSocket):
     listener = None
     try:
         data = await ws.receive_json()
+        class_id = str(data.get("class_id") or "").strip()
         claimed_id = str(data.get("camera_id") or "").strip()
         if claimed_id:
             try:
@@ -1016,22 +1044,36 @@ async def websocket_endpoint(ws: WebSocket):
             "total_frames": total_frames,
         })
         recognizer = await asyncio.to_thread(get_recognizer)
+        if class_id:
+            classes = await asyncio.to_thread(load_student_classes)
+            known = sorted({c for c in classes.values() if c})
+            if class_id not in known:
+                await ws.send_json({
+                    "error": f"Không thấy lớp «{class_id}». Các lớp hiện có: {', '.join(known) or '(trống)'}.",
+                })
+                return
         source_label = mask_url(source) if is_camera else _upload_label(source)
         reopen = (lambda src=source: create_camera_capture(src)[0]) if is_camera else None
         session = await asyncio.to_thread(
-            _StreamSession, cap, fps, is_camera, recognizer, source_label, reopen
+            _StreamSession, cap, fps, is_camera, recognizer, source_label, reopen, class_id
         )
         cap = None
         _register_report(session.session_id, session.recorder)
+        gallery_n = len(session.identity.rec.ids)
+        roster_n = len(session._student_names)
+        class_msg = f" · lớp {class_id} ({roster_n} HS, gallery {gallery_n})" if class_id else f" · gallery {gallery_n} HS"
 
         await ws.send_json({
             "status": "streaming",
             "message": (
                 (f"Đang theo dõi {claimed_name} · " if claimed_name else "Đã bắt đầu phát · ")
                 + f"YOLO: {Path(_config.yolo_model).name} · "
-                f"pose: {Path(_config.pose_model).name} · gallery {len(recognizer.ids)} HS"
+                f"pose: {Path(_config.pose_model).name}"
+                + class_msg
             ),
-            "gallery_size": len(recognizer.ids),
+            "gallery_size": gallery_n,
+            "class_id": class_id or None,
+            "roster_size": roster_n,
             "session_id": session.session_id,
             "camera_id": claimed_id or None,
             "report_url": f"/api/report/{session.session_id}",

@@ -1,0 +1,57 @@
+{
+  "model": "yolo12n.pt",
+  "task": "detect",
+  "class_names": [
+    "person"
+  ],
+  "dataset": "frame toàn cảnh lớp (Roboflow, CC BY 4.0)",
+  "dataset_url": "https://universe.roboflow.com/his-workspace-qchkq/frame-toan-canh-lop-rrz7r/dataset/2",
+  "splits": {
+    "train": {
+      "images": 120
+    },
+    "valid": {
+      "images": 8
+    },
+    "test": {
+      "images": 2
+    }
+  },
+  "train": {
+    "epochs_max": 100,
+    "patience": 15,
+    "epochs_ran": 100,
+    "early_stopping": false,
+    "imgsz": 640,
+    "batch": 16,
+    "seed": 0,
+    "optimizer": "auto",
+    "pretrained": true,
+    "best_epoch": 87,
+    "best_checkpoint_metrics": {
+      "precision": 0.96924,
+      "recall": 0.9685,
+      "mAP50": 0.99291,
+      "mAP50_95": 0.75786
+    }
+  },
+  "eval_best_pt": {
+    "val": {
+      "precision": 0.9692169355635062,
+      "recall": 0.968503937007874,
+      "mAP50": 0.9929131034912532,
+      "mAP50_95": 0.7585783701092688
+    },
+    "test": {
+      "precision": 0.9686792595783146,
+      "recall": 0.9665216767169086,
+      "mAP50": 0.9829334044837407,
+      "mAP50_95": 0.7606541279775311
+    }
+  },
+  "weights": {
+    "best": "weights/best.pt",
+    "last": "weights/last.pt"
+  },
+  "exported_at_utc": "2026-11-05T14:04:05.962123+00:00"
+}

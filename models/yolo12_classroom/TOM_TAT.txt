@@ -1,0 +1,20 @@
+YOLOv12n — phát hiện người trên frame toàn cảnh lớp
+
+Model khởi tạo: yolo12n.pt (pretrained COCO)
+Ảnh: 640, batch: 16, seed: 0
+Epoch tối đa: 100; patience: 15 (dừng nếu mAP50-95 valid không tăng)
+Epoch đã chạy: 100
+Early stopping: không
+Epoch tốt nhất: 87
+
+Chỉ số tại epoch tốt nhất (results.csv):
+  precision: 0.9692
+  recall: 0.9685
+  mAP50: 0.9929
+  mAP50_95: 0.7579
+
+Đánh giá lại best.pt:
+  valid: {'precision': 0.9692169355635062, 'recall': 0.968503937007874, 'mAP50': 0.9929131034912532, 'mAP50_95': 0.7585783701092688}
+  test: {'precision': 0.9686792595783146, 'recall': 0.9665216767169086, 'mAP50': 0.9829334044837407, 'mAP50_95': 0.7606541279775311}
+
+File dùng cho báo cáo: weights/best.pt, args.yaml, results.csv, plots/, tom_tat.json

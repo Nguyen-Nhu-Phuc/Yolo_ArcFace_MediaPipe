@@ -220,17 +220,22 @@ def get_face_app():
         from insightface.app import FaceAnalysis
 
         print("Nạp InsightFace ArcFace (buffalo_l)...")
-        # Mặc định onnxruntime chiếm mọi nhân + spin-wait → YOLO/pose chạy song song bị chậm ~5x
+        # Giới hạn thread: quá nhiều → YOLO/pose chậm; quá ít → gắn tên trễ
         so = ort.SessionOptions()
-        so.intra_op_num_threads = int(os.environ.get("ARCFACE_THREADS", "2"))
+        so.intra_op_num_threads = int(os.environ.get("ARCFACE_THREADS", "4"))
         so.inter_op_num_threads = 1
         so.add_session_config_entry("session.intra_op.allow_spinning", "0")
+        # 256 nhanh hơn 320 trên CPU; đặt ARCFACE_DET_SIZE=320/640 nếu cần mặt xa hơn
+        det = int(os.environ.get("ARCFACE_DET_SIZE", "256"))
+        det = max(160, min(640, det))
+        if det % 32:
+            det = max(160, (det // 32) * 32)
         app = FaceAnalysis(
             name="buffalo_l", providers=["CPUExecutionProvider"], sess_options=so
         )
-        app.prepare(ctx_id=-1, det_size=(640, 640))
+        app.prepare(ctx_id=-1, det_size=(det, det))
         _face_app = app
-        print("InsightFace sẵn sàng.")
+        print(f"InsightFace sẵn sàng (det_size={det}, threads={so.intra_op_num_threads}).")
     return _face_app
 
 
@@ -360,6 +365,39 @@ class FaceRecognizer:
             f"margin={self.min_margin} | khóa cứng ≥{HARD_LOCK_PCT:.0f}% (+{HARD_LOCK_MARGIN_PCT:.0f}%)"
         )
 
+    def for_ids(self, allowed_ids: set[str] | list[str]) -> "FaceRecognizer":
+        """Bản gallery chỉ gồm mã trong allowed_ids — dùng cho nhận diện theo lớp.
+
+        Không nạp lại InsightFace; ngưỡng lấy từ bản gốc tại thời điểm gọi.
+        """
+        allowed = {str(x).strip() for x in allowed_ids if str(x).strip()}
+        idx = [i for i, sid in enumerate(self.ids) if sid in allowed]
+        clone = object.__new__(FaceRecognizer)
+        clone.gallery_path = f"{self.gallery_path} · {len(idx)}/{len(self.ids)} HS"
+        clone.ids = [self.ids[i] for i in idx]
+        clone.names = [self.names[i] for i in idx]
+        if idx:
+            clone.embeddings = self.embeddings[np.asarray(idx, dtype=np.int64)]
+        else:
+            dim = int(self.embeddings.shape[1]) if getattr(self.embeddings, "ndim", 0) == 2 else 512
+            clone.embeddings = np.zeros((0, dim), dtype=np.float32)
+        clone.match_threshold = self.match_threshold
+        clone.min_compat_pct = self.min_compat_pct
+        clone.min_margin = self.min_margin
+        clone.lock_sim = self.lock_sim
+        clone.hard_lock_sim = self.hard_lock_sim
+        clone.hard_lock_margin = self.hard_lock_margin
+        return clone
+
+    def for_class(self, class_id: str, class_map: dict[str, str] | None = None) -> "FaceRecognizer":
+        """Gallery chỉ học sinh thuộc lớp class_id."""
+        code = (class_id or "").strip()
+        if not code:
+            return self
+        classes = class_map if class_map is not None else load_student_classes()
+        allowed = {sid for sid, c in classes.items() if (c or "").strip() == code}
+        return self.for_ids(allowed)
+
     def _threshold_meta(self) -> dict:
         return {
             "match_threshold": round(self.match_threshold, 4),
@@ -484,7 +522,7 @@ class FaceRecognizer:
             key=lambda f: (f.bbox[2] - f.bbox[0]) * (f.bbox[3] - f.bbox[1]),
             reverse=True,
         )
-        for face in faces[:2]:
+        for face in faces[:1]:
             emb = np.asarray(face.normed_embedding, dtype=np.float32)
             sid, name, sim, margin = self._match_embedding(emb)
             if sid is not None and sim > best_sim:
@@ -497,7 +535,10 @@ class FaceRecognizer:
         if best_sid is not None:
             return best_sid, best_name, best_sim, best_margin
 
-        # Fallback: zoom ROI đầu rồi embed lại
+        # Fallback ROI tốn thêm 1–2 lần detect — tắt mặc định để tăng tốc
+        if os.environ.get("ARCFACE_ROI_FALLBACK", "0") != "1":
+            return best_sid, best_name, best_sim, best_margin
+
         rois = face_rois_from_person(work, app)
         for roi in rois:
             if roi is None or roi.size == 0:

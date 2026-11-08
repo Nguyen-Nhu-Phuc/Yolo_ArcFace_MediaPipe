@@ -191,6 +191,9 @@ svg { flex-shrink: 0; }
 .chips { display: flex; flex-wrap: wrap; gap: 5px; }
 .chip { padding: 3px 9px; border-radius: 12px; background: var(--surface-2); border: 1px solid var(--border); font-size: 11px; color: #cbd5e1; }
 .att-note { margin-top: 10px; font-size: 11px; color: var(--faint); line-height: 1.5; }
+.class-filter { display: flex; align-items: center; gap: 8px; margin: 0 0 10px; padding: 10px 12px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); }
+.class-filter label { font-size: 12px; font-weight: 700; color: var(--text); white-space: nowrap; }
+.class-filter select { flex: 1; height: 34px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface-2); color: var(--text); padding: 0 10px; font-size: 13px; font-weight: 600; }
 
 /* ---------- Tab Hành vi ---------- */
 .lg-actions { display: flex; gap: 6px; margin-bottom: 8px; }
@@ -309,6 +312,13 @@ svg { flex-shrink: 0; }
       <div class="meta-item"><div class="label">Khung</div><div class="value" id="frameIdx">-</div></div>
     </div>
 
+    <div class="class-filter" title="Chọn lớp để xem sĩ số và thống kê theo lớp">
+      <label for="classFilter">Lớp theo dõi</label>
+      <select id="classFilter">
+        <option value="">Tất cả lớp</option>
+      </select>
+    </div>
+
     <div class="card panel-card">
       <div class="tabs">
         <button class="tab-btn active" data-tab="cameras" onclick="showTab('cameras')">Camera</button>
@@ -354,6 +364,7 @@ svg { flex-shrink: 0; }
       </div>
 
       <div class="tab-panel" id="tab-class">
+        <div class="att-note" style="margin:0 0 10px">Điểm danh ArcFace và thống kê hành vi chỉ trong lớp đã chọn ở ô <b>Lớp theo dõi</b>. Phải chọn lớp trước khi Kết nối / Tải video.</div>
         <div class="att-grid">
           <div class="mini present">
             <div class="label">Có mặt / sĩ số</div>
@@ -613,6 +624,36 @@ function esc(s) {
   return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
 
+document.getElementById('classFilter').addEventListener('change', () => {
+  const next = document.getElementById('classFilter').value || '';
+  if (ws && ws.readyState === 1 && next !== selectedClass) {
+    const keep = selectedClass;
+    document.getElementById('classFilter').value = keep;
+    if (!confirm('Đổi lớp sẽ dừng phiên hiện tại và kết nối lại. Tiếp tục?')) return;
+    selectedClass = next;
+    localStorage.setItem('classFilter', selectedClass);
+    document.getElementById('classFilter').value = selectedClass;
+    const cam = activeCameraId;
+    disconnect();
+    setTimeout(() => connect(cam), 200);
+    return;
+  }
+  selectedClass = next;
+  localStorage.setItem('classFilter', selectedClass);
+  renderSummary();
+});
+
+async function loadClassOptions() {
+  try {
+    const res = await fetch('/api/admin/classes');
+    if (!res.ok) return;
+    const data = await res.json();
+    const classes = (data.classes || data || []).map(c => c.class_id || c).filter(Boolean);
+    syncClassFilter(classes);
+  } catch (_) { /* chưa có MongoDB / admin */ }
+}
+loadClassOptions();
+
 function shortId(sid) {
   if (!sid) return '';
   const m = String(sid).match(/^HS0*(\d+)$/i);
@@ -647,6 +688,35 @@ function setText(id, v) { document.getElementById(id).textContent = v; }
 
 let onFrameIds = new Set();
 let lastSummary = null;
+let selectedClass = localStorage.getItem('classFilter') || '';
+let knownClasses = [];
+
+function studentClass(s) {
+  return ((s && s.class_name) || '').trim();
+}
+
+function syncClassFilter(classes) {
+  const sel = document.getElementById('classFilter');
+  if (!sel) return;
+  const merged = new Set([...(knownClasses || []), ...(classes || [])].filter(Boolean));
+  if (selectedClass) merged.add(selectedClass);
+  const codes = [...merged].sort((a, b) => a.localeCompare(b, 'vi'));
+  knownClasses = codes;
+  const html = '<option value="">Tất cả lớp</option>' +
+    codes.map(c => `<option value="${esc(c)}">${esc(c)}</option>`).join('');
+  if (sel.innerHTML !== html) {
+    sel.innerHTML = html;
+  }
+  sel.value = codes.includes(selectedClass) ? selectedClass : '';
+  if (!codes.includes(selectedClass)) selectedClass = '';
+  localStorage.setItem('classFilter', selectedClass);
+}
+
+function avgPct(rows, key) {
+  const vals = rows.map(s => s.ernu && s.ernu[key]).filter(v => v != null && !Number.isNaN(Number(v)));
+  if (!vals.length) return null;
+  return Math.round(10 * vals.reduce((a, b) => a + Number(b), 0) / vals.length) / 10;
+}
 
 function fmtSecs(s) {
   if (s == null || s === '') return '-';
@@ -673,20 +743,73 @@ function renderSummary(data) {
   if (data) lastSummary = data;
   data = lastSummary;
   if (!data) return;
-  const present = data.present || [];
-  const absent = data.absent || [];
-  setText('attPresent', `${present.length}/${data.roster_size}`);
+  syncClassFilter([...(data.classes || []), data.default_class].filter(Boolean));
+
+  const cls = selectedClass;
+  const inClass = (s) => !cls || studentClass(s) === cls;
+  const present = (data.present || []).filter(inClass);
+  const absent = (data.absent || []).filter(inClass);
+  const rosterSize = cls
+    ? present.length + absent.length
+    : (data.roster_size || (present.length + absent.length));
+  const activitySecs = cls
+    ? present.reduce((n, s) => n + (Number(s.activity_secs) || 0), 0)
+    : data.class_activity_secs;
+  const reviewSecs = cls
+    ? present.reduce((n, s) => n + (Number(s.review_secs) || 0), 0)
+    : data.class_review_secs;
+  const unknownSecs = cls
+    ? present.reduce((n, s) => n + (Number(s.unknown_secs) || 0), 0)
+    : data.class_unknown_secs;
+
+  setText('attPresent', `${present.length}/${rosterSize}`);
   document.getElementById('attPresentBar').style.width =
-    (data.roster_size ? Math.round(100 * present.length / data.roster_size) : 0) + '%';
+    (rosterSize ? Math.round(100 * present.length / rosterSize) : 0) + '%';
   setText('attAbsent', absent.length);
-  setText('attActivity', fmtSecs(data.class_activity_secs));
-  setText('attReview', fmtSecs(data.class_review_secs));
-  setText('attUnknown', fmtSecs(data.class_unknown_secs));
+  setText('attActivity', fmtSecs(activitySecs));
+  setText('attReview', fmtSecs(reviewSecs));
+  setText('attUnknown', fmtSecs(unknownSecs));
   setText('attAbsentN', absent.length);
 
   const ernu = data.ernu || {};
   const pct = v => (v == null || v === undefined) ? '—' : `${v}%`;
-  if (ernu.data_status === 'Chưa đủ dữ liệu') {
+  const focusOn = present.filter(s => (s.ernu || {}).focus_verdict === 'Tập trung').length;
+  const focusOff = present.filter(s => (s.ernu || {}).focus_verdict === 'Không tập trung').length;
+  const focusNA = present.filter(s => {
+    const v = (s.ernu || {}).focus_verdict;
+    return !v || v === 'Chưa đủ dữ liệu';
+  }).length;
+
+  if (cls) {
+    const cAvg = avgPct(present, 'C');
+    const pe = avgPct(present, 'P_E');
+    const pr = avgPct(present, 'P_R');
+    const pn = avgPct(present, 'P_N');
+    const pu = avgPct(present, 'P_U');
+    const pon = avgPct(present, 'P_ON');
+    const poff = avgPct(present, 'P_OFF');
+    const punc = avgPct(present, 'P_UNCERTAIN');
+    const beei = avgPct(present, 'BEEI');
+    if (!present.length) {
+      setText('attCoverage', '—');
+      setText('attPE', '—'); setText('attPR', '—'); setText('attPN', '—');
+      setText('attPU', '—'); setText('attBEEI', '—');
+      setText('attPON', '—'); setText('attPOFF', '—'); setText('attPUnc', '—');
+    } else {
+      setText('attCoverage', cAvg == null ? '—' : pct(cAvg));
+      setText('attPE', pe == null ? '—' : pct(pe));
+      setText('attPR', pr == null ? '—' : pct(pr));
+      setText('attPN', pn == null ? '—' : pct(pn));
+      setText('attPU', pu == null ? '—' : pct(pu));
+      setText('attBEEI', beei == null ? '—' : String(beei));
+      setText('attPON', pon == null ? '—' : pct(pon));
+      setText('attPOFF', poff == null ? '—' : pct(poff));
+      setText('attPUnc', punc == null ? '—' : pct(punc));
+    }
+    setText('attFocusOn', String(focusOn));
+    setText('attFocusOff', String(focusOff));
+    setText('attFocusNA', String(focusNA));
+  } else if (ernu.data_status === 'Chưa đủ dữ liệu') {
     setText('attCoverage', ernu.C != null ? pct(ernu.C) : 'Chưa đủ dữ liệu');
     setText('attPE', '—');
     setText('attPR', '—');
@@ -696,6 +819,9 @@ function renderSummary(data) {
     setText('attPON', '—');
     setText('attPOFF', '—');
     setText('attPUnc', '—');
+    setText('attFocusOn', ernu.n_tap_trung != null ? String(ernu.n_tap_trung) : '—');
+    setText('attFocusOff', ernu.n_khong_tap_trung != null ? String(ernu.n_khong_tap_trung) : '—');
+    setText('attFocusNA', ernu.n_chua_du_du_lieu != null ? String(ernu.n_chua_du_du_lieu) : '—');
   } else {
     setText('attCoverage', pct(ernu.C));
     setText('attPE', pct(ernu.P_E));
@@ -707,10 +833,10 @@ function renderSummary(data) {
     setText('attPON', pct(ernu.P_ON));
     setText('attPOFF', pct(ernu.P_OFF));
     setText('attPUnc', pct(ernu.P_UNCERTAIN));
+    setText('attFocusOn', ernu.n_tap_trung != null ? String(ernu.n_tap_trung) : '—');
+    setText('attFocusOff', ernu.n_khong_tap_trung != null ? String(ernu.n_khong_tap_trung) : '—');
+    setText('attFocusNA', ernu.n_chua_du_du_lieu != null ? String(ernu.n_chua_du_du_lieu) : '—');
   }
-  setText('attFocusOn', ernu.n_tap_trung != null ? String(ernu.n_tap_trung) : '—');
-  setText('attFocusOff', ernu.n_khong_tap_trung != null ? String(ernu.n_khong_tap_trung) : '—');
-  setText('attFocusNA', ernu.n_chua_du_du_lieu != null ? String(ernu.n_chua_du_du_lieu) : '—');
 
   document.getElementById('attTrend').innerHTML = (data.timeline || []).length
     ? trendSvg(data.timeline)
@@ -729,7 +855,7 @@ function renderSummary(data) {
       .map(s => {
         const e = s.ernu || {};
         const verdict = e.focus_verdict || 'Chưa đủ dữ liệu';
-        const cls = verdict === 'Không tập trung' ? 'review'
+        const rowCls = verdict === 'Không tập trung' ? 'review'
           : (verdict === 'Tập trung' ? 'activity' : 'clear');
         const dot = onFrameIds.has(s.student_id) ? '<span class="on-frame" title="Đang trên khung"></span>' : '';
         const tags = []
@@ -748,7 +874,7 @@ function renderSummary(data) {
         if (s.review_secs) bits.push(`B4/B5 ${fmtSecs(s.review_secs)}`);
         if (s.activity_secs) bits.push(`B1/B2 ${fmtSecs(s.activity_secs)}`);
         return '<div class="student-row">' +
-          `<div class="id-badge ${cls}">${esc(boxCode(s))}</div>` +
+          `<div class="id-badge ${rowCls}">${esc(boxCode(s))}</div>` +
           '<div class="info">' +
             `<div class="name">${esc(s.name || s.student_id)}${dot}</div>` +
             `<div class="att-meta">${bits.join(' · ')}</div>` +
@@ -756,14 +882,16 @@ function renderSummary(data) {
           '</div>' +
         '</div>';
       }).join('')
-    : '<span class="empty">Chưa nhận diện được học sinh nào</span>';
+    : '<span class="empty">Chưa nhận diện được học sinh nào' + (cls ? ` trong lớp ${esc(cls)}` : '') + '</span>';
 
   document.getElementById('attAbsentList').innerHTML = absent.length
     ? absent.map(s => `<span class="chip" title="${esc(s.student_id)}">${esc(s.name || s.student_id)}</span>`).join('')
     : '<span class="empty">Đủ sĩ số</span>';
 
   const interp = (ernu.interpretation || '').trim();
+  const classNote = cls ? `Đang xem lớp ${cls}. ` : 'Đang xem tất cả lớp. ';
   document.getElementById('attNote').textContent =
+    classNote +
     (data.unknown_tracks ? `${data.unknown_tracks} người trên khung chưa nhận diện được mặt (chưa tính vào có mặt). ` : '') +
     (interp ? interp + ' ' : '') +
     'Máy tự kết luận theo thời gian đã nhận diện từng HS (không đòi bao phủ cả video). ' +
@@ -813,6 +941,15 @@ let activeCameraId = null;
 let betweenSessions = false;
 
 function connect(cameraId) {
+  selectedClass = document.getElementById('classFilter').value || selectedClass || '';
+  localStorage.setItem('classFilter', selectedClass);
+  if (!selectedClass) {
+    log('Chọn lớp theo dõi trước khi kết nối (ô «Lớp theo dõi» bên phải).');
+    showTab('class');
+    document.getElementById('classFilter').focus();
+    alert('Chọn lớp theo dõi trước. Điểm danh và hành vi chỉ tính trong lớp đã chọn.');
+    return;
+  }
   if (ws) {
     const old = ws;
     ws = null;
@@ -825,7 +962,7 @@ function connect(cameraId) {
   const shown = activeCameraId
     ? ((cameraSnapshot.find(c => c.id === activeCameraId) || {}).name || 'camera đã lưu')
     : source.replace(/(:\/\/[^:\/@]+):[^@\/]*@/, '$1:***@');
-  log('Đang kết nối tới ' + shown + '...');
+  log('Đang kết nối tới ' + shown + ' · lớp ' + selectedClass + '...');
 
   const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
   const socket = new WebSocket(proto + '//' + location.host + '/ws');
@@ -835,7 +972,10 @@ function connect(cameraId) {
   socket.onopen = () => {
     document.getElementById('btnConnect').disabled = true;
     document.getElementById('btnStop').disabled = false;
-    socket.send(JSON.stringify(activeCameraId ? { camera_id: activeCameraId } : { video_source: source }));
+    const payload = activeCameraId
+      ? { camera_id: activeCameraId, class_id: selectedClass }
+      : { video_source: source, class_id: selectedClass };
+    socket.send(JSON.stringify(payload));
   };
 
   socket.onmessage = (event) => {
