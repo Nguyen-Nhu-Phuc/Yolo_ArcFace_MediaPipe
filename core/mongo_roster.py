@@ -371,11 +371,32 @@ def preview_report(name: str) -> dict:
         return _preview_report_locked(name, raw_file, openpyxl)
 
 
+# Preview admin chỉ hiện điểm danh + kết luận (báo cáo cũ vẫn còn sheet kỹ thuật).
+_PREVIEW_SHEETS = (
+    "Điểm danh theo HS",
+    "Kết luận tập trung",
+    "KET_LUAN_TAP_TRUNG",
+)
+_ATTENDANCE_COLS = (
+    "STT", "Mã HS", "Họ và tên", "Lớp", "Trạng thái",
+    "Kết luận tập trung", "Điểm tập trung",
+    "Ngày (như video)", "Giờ điểm danh (lần đầu nhận diện)",
+    "Lần cuối thấy", "Thời gian có mặt (phút)",
+    "Mức tin cậy", "Ảnh khuôn mặt (trong lớp)", "Ghi chú (giáo viên)",
+)
+_FOCUS_COLS = ("STT", "Mã HS", "Họ và tên", "Kết luận", "Điểm")
+_SUMMARY_HIDE = (
+    "Tín hiệu", "Không xác định", "Track chưa", "Quy tắc điểm danh", "B1/", "B4/", "pose",
+)
+
+
 def _preview_report_locked(name: str, raw_file: bytes, openpyxl) -> dict:
     wb = openpyxl.load_workbook(io.BytesIO(raw_file), read_only=True, data_only=True)
     sheets = []
     try:
         for ws in wb.worksheets:
+            if ws.title not in _PREVIEW_SHEETS:
+                continue
             raw_rows = []
             for i, row in enumerate(ws.iter_rows(values_only=True)):
                 if i > 120:
@@ -393,16 +414,40 @@ def _preview_report_locked(name: str, raw_file: bytes, openpyxl) -> dict:
             headers = list(raw_rows[header_idx])
             while headers and headers[-1] == "":
                 headers.pop()
-            width = len(headers) or 1
             summary = []
             for row in raw_rows[:header_idx]:
                 label = row[0] if row else ""
                 value = row[3] if len(row) > 3 and row[3] else (row[1] if len(row) > 1 else "")
                 if label and not label.startswith("BÁO CÁO"):
+                    if any(k in label for k in _SUMMARY_HIDE):
+                        continue
                     summary.append({"label": label, "value": value})
-            body = [row[:width] + [""] * max(0, width - len(row)) for row in raw_rows[header_idx + 1:]]
+            keep = None
+            if ws.title == "Điểm danh theo HS":
+                keep = _ATTENDANCE_COLS
+            elif ws.title in ("Kết luận tập trung", "KET_LUAN_TAP_TRUNG"):
+                keep = _FOCUS_COLS
+            if keep:
+                idxs = [i for i, h in enumerate(headers) if h in keep]
+                if idxs:
+                    headers = [headers[i] for i in idxs]
+                    raw_rows = [
+                        *raw_rows[: header_idx + 1],
+                        *[
+                            [row[j] if j < len(row) else "" for j in idxs]
+                            for row in raw_rows[header_idx + 1:]
+                        ],
+                    ]
+            width = len(headers) or 1
+            body = [
+                row[:width] + [""] * max(0, width - len(row))
+                for row in raw_rows[header_idx + 1:]
+            ]
+            display_name = (
+                "Kết luận tập trung" if ws.title == "KET_LUAN_TAP_TRUNG" else ws.title
+            )
             sheets.append({
-                "name": ws.title,
+                "name": display_name,
                 "summary": summary[:20],
                 "headers": headers,
                 "rows": body[:80],

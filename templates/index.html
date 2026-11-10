@@ -364,7 +364,8 @@ svg { flex-shrink: 0; }
       </div>
 
       <div class="tab-panel" id="tab-class">
-        <div class="att-note" style="margin:0 0 10px">Điểm danh ArcFace và thống kê hành vi chỉ trong lớp đã chọn ở ô <b>Lớp theo dõi</b>. Phải chọn lớp trước khi Kết nối / Tải video.</div>
+        <div class="att-note" style="margin:0 0 10px">Điểm danh và kết luận tập trung theo lớp đã chọn ở ô <b>Lớp theo dõi</b>. Phải chọn lớp trước khi Kết nối / Tải video.</div>
+        <div class="lg-section">Điểm danh</div>
         <div class="att-grid">
           <div class="mini present">
             <div class="label">Có mặt / sĩ số</div>
@@ -373,31 +374,13 @@ svg { flex-shrink: 0; }
           </div>
           <div class="mini absent"><div class="label">Vắng / chưa nhận diện</div><div class="value" id="attAbsent">-</div></div>
         </div>
-        <div class="att-grid groups">
-          <div class="mini"><div class="label">Độ bao phủ C</div><div class="value" id="attCoverage">-</div></div>
-          <div class="mini"><div class="label">P_E (bằng chứng nhiệm vụ)</div><div class="value" id="attPE">-</div></div>
-          <div class="mini review"><div class="label">P_R (cần xem lại)</div><div class="value" id="attPR">-</div></div>
-          <div class="mini"><div class="label">P_N (chưa đủ căn cứ)</div><div class="value" id="attPN">-</div></div>
-          <div class="mini"><div class="label">P_U (thiếu quan sát)</div><div class="value" id="attPU">-</div></div>
-          <div class="mini"><div class="label">BEEI (phụ)</div><div class="value" id="attBEEI">-</div></div>
-        </div>
-        <div class="lg-section">Kết luận tự động (hết phiên / đang tổng hợp)</div>
+        <div class="lg-section">Kết luận tập trung</div>
         <div class="att-grid groups">
           <div class="mini"><div class="label">Tập trung</div><div class="value" id="attFocusOn">-</div></div>
           <div class="mini review"><div class="label">Không tập trung</div><div class="value" id="attFocusOff">-</div></div>
           <div class="mini"><div class="label">Chưa đủ dữ liệu</div><div class="value" id="attFocusNA">-</div></div>
-          <div class="mini"><div class="label">P_ON</div><div class="value" id="attPON">-</div></div>
-          <div class="mini review"><div class="label">P_OFF</div><div class="value" id="attPOFF">-</div></div>
-          <div class="mini"><div class="label">P_UNCERTAIN</div><div class="value" id="attPUnc">-</div></div>
         </div>
-        <div class="att-grid groups">
-          <div class="mini"><div class="label">Tín hiệu B1/B2 (giây)</div><div class="value" id="attActivity">-</div></div>
-          <div class="mini review"><div class="label">Tín hiệu B4/B5 (giây)</div><div class="value" id="attReview">-</div></div>
-          <div class="mini"><div class="label">Thiếu pose (giây)</div><div class="value" id="attUnknown">-</div></div>
-        </div>
-        <div class="lg-section">Tỷ lệ khung có tín hiệu cần xem (B4/B5) theo phút</div>
-        <div class="trend" id="attTrend"><span class="empty">Chưa có dữ liệu</span></div>
-        <div class="lg-section">Có mặt — kết luận tập trung xếp trước</div>
+        <div class="lg-section">Có mặt — kết luận xếp trước</div>
         <div id="attList"><span class="empty">Chưa nhận diện được học sinh nào</span></div>
         <div class="lg-section">Vắng / chưa nhận diện (<span id="attAbsentN">0</span>)</div>
         <div class="chips" id="attAbsentList"><span class="empty">—</span></div>
@@ -712,33 +695,6 @@ function syncClassFilter(classes) {
   localStorage.setItem('classFilter', selectedClass);
 }
 
-function avgPct(rows, key) {
-  const vals = rows.map(s => s.ernu && s.ernu[key]).filter(v => v != null && !Number.isNaN(Number(v)));
-  if (!vals.length) return null;
-  return Math.round(10 * vals.reduce((a, b) => a + Number(b), 0) / vals.length) / 10;
-}
-
-function fmtSecs(s) {
-  if (s == null || s === '') return '-';
-  const n = Number(s);
-  if (!n) return '0s';
-  if (n < 60) return Math.round(n) + 's';
-  return (n / 60).toFixed(1) + ' phút';
-}
-
-function trendSvg(timeline) {
-  const W = 300, H = 64, n = timeline.length;
-  const bw = W / Math.max(n, 1);
-  const y = v => H - (v / 100) * H;
-  const bars = timeline.map((p, i) => {
-    const v = p.review_pct || 0;
-    return `<rect x="${(i * bw + 0.5).toFixed(1)}" y="${y(v).toFixed(1)}" width="${Math.max(bw - 1, 1).toFixed(1)}" ` +
-      `height="${(H - y(v)).toFixed(1)}" fill="#f59e0b" opacity="0.85"><title>${esc(p.label)}: ${v}% cần xem</title></rect>`;
-  }).join('');
-  return `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">${bars}</svg>` +
-    `<div class="trend-axis"><span>${esc(timeline[0].label)}</span><span>cần xem lại</span><span>${esc(timeline[n - 1].label)}</span></div>`;
-}
-
 function renderSummary(data) {
   if (data) lastSummary = data;
   data = lastSummary;
@@ -752,27 +708,14 @@ function renderSummary(data) {
   const rosterSize = cls
     ? present.length + absent.length
     : (data.roster_size || (present.length + absent.length));
-  const activitySecs = cls
-    ? present.reduce((n, s) => n + (Number(s.activity_secs) || 0), 0)
-    : data.class_activity_secs;
-  const reviewSecs = cls
-    ? present.reduce((n, s) => n + (Number(s.review_secs) || 0), 0)
-    : data.class_review_secs;
-  const unknownSecs = cls
-    ? present.reduce((n, s) => n + (Number(s.unknown_secs) || 0), 0)
-    : data.class_unknown_secs;
+  const ernu = data.ernu || {};
 
   setText('attPresent', `${present.length}/${rosterSize}`);
   document.getElementById('attPresentBar').style.width =
     (rosterSize ? Math.round(100 * present.length / rosterSize) : 0) + '%';
   setText('attAbsent', absent.length);
-  setText('attActivity', fmtSecs(activitySecs));
-  setText('attReview', fmtSecs(reviewSecs));
-  setText('attUnknown', fmtSecs(unknownSecs));
   setText('attAbsentN', absent.length);
 
-  const ernu = data.ernu || {};
-  const pct = v => (v == null || v === undefined) ? '—' : `${v}%`;
   const focusOn = present.filter(s => (s.ernu || {}).focus_verdict === 'Tập trung').length;
   const focusOff = present.filter(s => (s.ernu || {}).focus_verdict === 'Không tập trung').length;
   const focusNA = present.filter(s => {
@@ -781,66 +724,14 @@ function renderSummary(data) {
   }).length;
 
   if (cls) {
-    const cAvg = avgPct(present, 'C');
-    const pe = avgPct(present, 'P_E');
-    const pr = avgPct(present, 'P_R');
-    const pn = avgPct(present, 'P_N');
-    const pu = avgPct(present, 'P_U');
-    const pon = avgPct(present, 'P_ON');
-    const poff = avgPct(present, 'P_OFF');
-    const punc = avgPct(present, 'P_UNCERTAIN');
-    const beei = avgPct(present, 'BEEI');
-    if (!present.length) {
-      setText('attCoverage', '—');
-      setText('attPE', '—'); setText('attPR', '—'); setText('attPN', '—');
-      setText('attPU', '—'); setText('attBEEI', '—');
-      setText('attPON', '—'); setText('attPOFF', '—'); setText('attPUnc', '—');
-    } else {
-      setText('attCoverage', cAvg == null ? '—' : pct(cAvg));
-      setText('attPE', pe == null ? '—' : pct(pe));
-      setText('attPR', pr == null ? '—' : pct(pr));
-      setText('attPN', pn == null ? '—' : pct(pn));
-      setText('attPU', pu == null ? '—' : pct(pu));
-      setText('attBEEI', beei == null ? '—' : String(beei));
-      setText('attPON', pon == null ? '—' : pct(pon));
-      setText('attPOFF', poff == null ? '—' : pct(poff));
-      setText('attPUnc', punc == null ? '—' : pct(punc));
-    }
     setText('attFocusOn', String(focusOn));
     setText('attFocusOff', String(focusOff));
     setText('attFocusNA', String(focusNA));
-  } else if (ernu.data_status === 'Chưa đủ dữ liệu') {
-    setText('attCoverage', ernu.C != null ? pct(ernu.C) : 'Chưa đủ dữ liệu');
-    setText('attPE', '—');
-    setText('attPR', '—');
-    setText('attPN', '—');
-    setText('attPU', pct(ernu.P_U));
-    setText('attBEEI', '—');
-    setText('attPON', '—');
-    setText('attPOFF', '—');
-    setText('attPUnc', '—');
-    setText('attFocusOn', ernu.n_tap_trung != null ? String(ernu.n_tap_trung) : '—');
-    setText('attFocusOff', ernu.n_khong_tap_trung != null ? String(ernu.n_khong_tap_trung) : '—');
-    setText('attFocusNA', ernu.n_chua_du_du_lieu != null ? String(ernu.n_chua_du_du_lieu) : '—');
   } else {
-    setText('attCoverage', pct(ernu.C));
-    setText('attPE', pct(ernu.P_E));
-    setText('attPR', pct(ernu.P_R));
-    setText('attPN', pct(ernu.P_N));
-    setText('attPU', pct(ernu.P_U));
-    const beeiTxt = ernu.BEEI != null ? String(ernu.BEEI) : '—';
-    setText('attBEEI', ernu.publishable === false ? `${beeiTxt} (C thấp)` : beeiTxt);
-    setText('attPON', pct(ernu.P_ON));
-    setText('attPOFF', pct(ernu.P_OFF));
-    setText('attPUnc', pct(ernu.P_UNCERTAIN));
-    setText('attFocusOn', ernu.n_tap_trung != null ? String(ernu.n_tap_trung) : '—');
-    setText('attFocusOff', ernu.n_khong_tap_trung != null ? String(ernu.n_khong_tap_trung) : '—');
-    setText('attFocusNA', ernu.n_chua_du_du_lieu != null ? String(ernu.n_chua_du_du_lieu) : '—');
+    setText('attFocusOn', ernu.n_tap_trung != null ? String(ernu.n_tap_trung) : String(focusOn));
+    setText('attFocusOff', ernu.n_khong_tap_trung != null ? String(ernu.n_khong_tap_trung) : String(focusOff));
+    setText('attFocusNA', ernu.n_chua_du_du_lieu != null ? String(ernu.n_chua_du_du_lieu) : String(focusNA));
   }
-
-  document.getElementById('attTrend').innerHTML = (data.timeline || []).length
-    ? trendSvg(data.timeline)
-    : '<span class="empty">Chưa có dữ liệu</span>';
 
   const verdictRank = { 'Không tập trung': 0, 'Chưa đủ dữ liệu': 1, 'Tập trung': 2 };
   document.getElementById('attList').innerHTML = present.length
@@ -858,27 +749,13 @@ function renderSummary(data) {
         const rowCls = verdict === 'Không tập trung' ? 'review'
           : (verdict === 'Tập trung' ? 'activity' : 'clear');
         const dot = onFrameIds.has(s.student_id) ? '<span class="on-frame" title="Đang trên khung"></span>' : '';
-        const tags = []
-          .concat(s.review || [], s.activity || [], s.neutral || [], s.posture || [])
-          .map(b => {
-            const kind = (s.review || []).includes(b) ? 'review'
-              : ((s.posture || []).includes(b) ? 'posture' : 'activity');
-            return `<span class="tag ${kind}" title="${esc(b.name)}: ${b.count} lần, ${b.secs} giây">${esc(b.name)} ${fmtSecs(b.secs)}</span>`;
-          }).join('');
         const bits = [`<b>${esc(verdict)}</b>`];
         if (e.focus_score != null) bits.push(`điểm ${e.focus_score}`);
-        if (e.C != null) bits.push(`C ${e.C}%`);
-        if (e.P_ON != null) bits.push(`ON ${e.P_ON}%`);
-        if (e.P_OFF != null) bits.push(`OFF ${e.P_OFF}%`);
-        if (e.BEEI != null) bits.push(`BEEI ${e.BEEI}`);
-        if (s.review_secs) bits.push(`B4/B5 ${fmtSecs(s.review_secs)}`);
-        if (s.activity_secs) bits.push(`B1/B2 ${fmtSecs(s.activity_secs)}`);
         return '<div class="student-row">' +
           `<div class="id-badge ${rowCls}">${esc(boxCode(s))}</div>` +
           '<div class="info">' +
             `<div class="name">${esc(s.name || s.student_id)}${dot}</div>` +
             `<div class="att-meta">${bits.join(' · ')}</div>` +
-            (tags ? `<div class="reasons">${tags}</div>` : '') +
           '</div>' +
         '</div>';
       }).join('')
@@ -888,15 +765,11 @@ function renderSummary(data) {
     ? absent.map(s => `<span class="chip" title="${esc(s.student_id)}">${esc(s.name || s.student_id)}</span>`).join('')
     : '<span class="empty">Đủ sĩ số</span>';
 
-  const interp = (ernu.interpretation || '').trim();
   const classNote = cls ? `Đang xem lớp ${cls}. ` : 'Đang xem tất cả lớp. ';
   document.getElementById('attNote').textContent =
     classNote +
     (data.unknown_tracks ? `${data.unknown_tracks} người trên khung chưa nhận diện được mặt (chưa tính vào có mặt). ` : '') +
-    (interp ? interp + ' ' : '') +
-    'Máy tự kết luận theo thời gian đã nhận diện từng HS (không đòi bao phủ cả video). ' +
-    'Viết bài/giơ tay → tập trung; gục bàn → không tập trung. ' +
-    `Điểm ≥ ${ernu.focus_threshold ?? 50} → «Tập trung». Cần ≥ ~20s dữ liệu hợp lệ. Excel: focus_verdict.`;
+    `Điểm ≥ ${ernu.focus_threshold ?? 50} → «Tập trung». Cần ≥ ~20s dữ liệu hợp lệ để kết luận.`;
 }
 
 function renderStats(data) {
@@ -1274,17 +1147,10 @@ function clearSessionBoard() {
   setText('attPresent', '-');
   document.getElementById('attPresentBar').style.width = '0%';
   setText('attAbsent', '-');
-  setText('attActivity', '-');
-  setText('attReview', '-');
-  setText('attUnknown', '-');
-  setText('attCoverage', '-');
-  setText('attPE', '-');
-  setText('attPR', '-');
-  setText('attPN', '-');
-  setText('attPU', '-');
-  setText('attBEEI', '-');
+  setText('attFocusOn', '-');
+  setText('attFocusOff', '-');
+  setText('attFocusNA', '-');
   setText('attAbsentN', '0');
-  document.getElementById('attTrend').innerHTML = '<span class="empty">Chưa có dữ liệu</span>';
   document.getElementById('attList').innerHTML = betweenSessions
     ? '<span class="empty">Đang chờ. Bấm Bắt đầu phiên khi tiết mới bắt đầu.</span>'
     : '<span class="empty">Chưa nhận diện được học sinh nào</span>';
